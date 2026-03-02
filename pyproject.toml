@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market-data-ta-service"
+version = "0.1.0"
+description = "Market data ingestion, TA computation, and visualization backend"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "pandas>=2.2.0",
+  "numpy>=1.26.0",
+  "sqlalchemy>=2.0.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.3.0",
+  "python-dotenv>=1.0.0",
+  "pyyaml>=6.0.0",
+  "ccxt>=4.3.0",
+  "apscheduler>=3.10.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

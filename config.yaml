@@ -1,0 +1,41 @@
+providers:
+  default_provider: "mock"
+  ccxt:
+    venue: "binance"
+    rate_limit: true
+
+symbols:
+  - "BTC/USDT"
+  - "ETH/USDT"
+
+timeframes:
+  - "1m"
+  - "5m"
+  - "1h"
+
+cache_horizon_days:
+  "1m": 30
+  "5m": 180
+  "1h": 730
+  "1d": 3650
+
+ingestion:
+  warmup_bars: 2000
+  poll_delay_seconds: 3
+  retries: 5
+  backoff_seconds: 2
+
+indicators:
+  bollinger:
+    length: 20
+    stdev: 2.0
+  rsi:
+    length: 14
+  atr:
+    length: 14
+  ema_lengths:
+    - 20
+    - 50
+    - 200
+  volume_sma: 20
+  vwap_mode: "rolling"
