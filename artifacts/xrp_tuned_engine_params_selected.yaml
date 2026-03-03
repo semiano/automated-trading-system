@@ -10,13 +10,13 @@ cost_model:
 xrp_strategy_params:
   rsi_length: 20
   atr_length: 8
-  ema_fast: 10
-  ema_slow: 50
-  rsi_entry: 37.0
-  rsi_exit: 67.0
-  stop_atr: 1.4
-  take_profit_atr: 3.2
-  max_hold_bars: 470
+  ema_fast: 8
+  ema_slow: 34
+  rsi_entry: 45.0
+  rsi_exit: 55.0
+  stop_atr: 1.2
+  take_profit_atr: 2.0
+  max_hold_bars: 160
 best_observed_metrics:
   robust_score: 16.3506
   full:
