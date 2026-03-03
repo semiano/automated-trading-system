@@ -218,6 +218,13 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
 
       <section style={{ border: "1px solid #22262f", borderRadius: 6 }}>
         <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600 }}>Control Plane</div>
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid #1b1f29", fontSize: 12, color: "#c7ced8" }}>
+          Active Global Policy: <strong>{riskPolicy.risk_budget_policy === "portfolio" ? "Portfolio" : "Per Symbol"}</strong>
+          <span style={{ marginLeft: 10 }}>
+            Global Soft Limit: <strong>{num(riskPolicy.portfolio_soft_risk_limit_usd, 2)}</strong>
+          </span>
+          {riskPolicy.portfolio_soft_risk_limit_usd <= 0 ? <span style={{ marginLeft: 10, color: "#9ca3af" }}>(disabled)</span> : null}
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
