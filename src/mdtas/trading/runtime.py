@@ -13,7 +13,7 @@ from mdtas.config import AppConfig, StrategyParamsConfig
 from mdtas.db.repo import CandleRepository
 from mdtas.db.trading_repo import TradingRepository
 from mdtas.indicators.engine import compute
-from mdtas.trading.execution_adapter import (
+from mdtas.trading.execution import (
     PaperExecutionAdapter,
     SymbolExecutionConstraints,
     gap_aware_raw_exit_price,
