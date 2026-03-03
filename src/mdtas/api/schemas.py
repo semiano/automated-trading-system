@@ -91,6 +91,16 @@ class RiskLimitUpdate(BaseModel):
     soft_limit_usd: float = Field(ge=0.0)
 
 
+class RiskPolicyOut(BaseModel):
+    risk_budget_policy: str
+    portfolio_soft_risk_limit_usd: float
+
+
+class RiskPolicyUpdate(BaseModel):
+    risk_budget_policy: str | None = None
+    portfolio_soft_risk_limit_usd: float | None = Field(default=None, ge=0.0)
+
+
 class AssetControlOut(BaseModel):
     symbol: str
     enabled: bool

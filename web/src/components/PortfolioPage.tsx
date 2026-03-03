@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAssetLogs } from "../api/client";
-import type { AssetControl, AssetEngineLog, ClosedTrade, OpenPosition } from "../api/types";
+import type { AssetControl, AssetEngineLog, ClosedTrade, OpenPosition, RiskPolicySettings } from "../api/types";
 import { num } from "../utils/formatting";
 
 type Props = {
@@ -8,6 +8,7 @@ type Props = {
   closedTrades: ClosedTrade[];
   totalNetPnl: number;
   assetControls: AssetControl[];
+  riskPolicy: RiskPolicySettings;
   pnlMode: "sim" | "live";
   onPnlMode: (mode: "sim" | "live") => void;
   onSaveAssetControl: (payload: {
@@ -16,6 +17,10 @@ type Props = {
     execution_mode?: "sim" | "live";
     trade_side?: "long_only" | "long_short" | "short_only";
     soft_risk_limit_usd?: number;
+  }) => Promise<void>;
+  onSaveRiskPolicy: (payload: {
+    risk_budget_policy?: "per_symbol" | "portfolio";
+    portfolio_soft_risk_limit_usd?: number;
   }) => Promise<void>;
 };
 
@@ -33,8 +38,9 @@ function toPoints(values: number[], width: number, height: number): string {
     .join(" ");
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, pnlMode, onPnlMode, onSaveAssetControl }: Props) {
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveRiskPolicy }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
+  const [draftPortfolioLimit, setDraftPortfolioLimit] = useState<string>(String(riskPolicy.portfolio_soft_risk_limit_usd));
   const [saving, setSaving] = useState(false);
   const [logSymbol, setLogSymbol] = useState<string | null>(null);
   const [logRows, setLogRows] = useState<AssetEngineLog[]>([]);
@@ -50,6 +56,10 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     }
     setDraftLimits(next);
   }, [assetControls]);
+
+  useEffect(() => {
+    setDraftPortfolioLimit(String(riskPolicy.portfolio_soft_risk_limit_usd));
+  }, [riskPolicy.portfolio_soft_risk_limit_usd]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -125,6 +135,86 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
         <strong>Closed Trades: {closedTrades.length}</strong>
         <strong>Total Net P&amp;L: {num(totalNetPnl, 4)}</strong>
       </div>
+
+      <section style={{ border: "1px solid #22262f", borderRadius: 6 }}>
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600 }}>Portfolio Risk Policy</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: 10, fontSize: 12 }}>
+          <span>Policy</span>
+          <div style={{ display: "inline-flex", border: "1px solid #2d3340", borderRadius: 6, overflow: "hidden" }}>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await onSaveRiskPolicy({ risk_budget_policy: "per_symbol" });
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              style={{
+                padding: "3px 8px",
+                border: "none",
+                borderRight: "1px solid #2d3340",
+                background: riskPolicy.risk_budget_policy === "per_symbol" ? "#2d3340" : "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              Per Symbol
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await onSaveRiskPolicy({ risk_budget_policy: "portfolio" });
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              style={{
+                padding: "3px 8px",
+                border: "none",
+                background: riskPolicy.risk_budget_policy === "portfolio" ? "#2d3340" : "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              Portfolio
+            </button>
+          </div>
+
+          <span>Portfolio Soft Limit</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={draftPortfolioLimit}
+            onChange={(e) => setDraftPortfolioLimit(e.target.value)}
+            style={{ width: 110, padding: "3px 6px", background: "#0f131c", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={async () => {
+              const parsed = Number(draftPortfolioLimit);
+              if (!Number.isFinite(parsed) || parsed < 0) return;
+              setSaving(true);
+              try {
+                await onSaveRiskPolicy({ portfolio_soft_risk_limit_usd: parsed });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: "#2d3340", color: "inherit", cursor: "pointer" }}
+          >
+            Set
+          </button>
+          <span style={{ color: "#9ca3af" }}>0 disables global cap</span>
+        </div>
+      </section>
 
       <section style={{ border: "1px solid #22262f", borderRadius: 6 }}>
         <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600 }}>Control Plane</div>

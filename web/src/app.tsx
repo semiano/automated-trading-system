@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchSymbols, updateAssetControl } from "./api/client";
-import type { AssetControl, ClosedTrade, Gap, IndicatorRow, OpenPosition } from "./api/types";
+import { fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
+import type { AssetControl, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
 import PortfolioPage from "./components/PortfolioPage";
@@ -37,6 +37,10 @@ export default function App() {
   const [chartOpenPositions, setChartOpenPositions] = useState<OpenPosition[]>([]);
   const [chartClosedTrades, setChartClosedTrades] = useState<ClosedTrade[]>([]);
   const [pnlMode, setPnlMode] = useState<"sim" | "live">("sim");
+  const [riskPolicy, setRiskPolicy] = useState<RiskPolicySettings>({
+    risk_budget_policy: "per_symbol",
+    portfolio_soft_risk_limit_usd: 0,
+  });
 
   const activeSymbols = useMemo(() => {
     if (assetControls.length > 0) {
@@ -113,6 +117,10 @@ export default function App() {
       fetchAssetControls()
         .then(setAssetControls)
         .catch(() => setAssetControls([]));
+
+      fetchRiskPolicySettings()
+        .then(setRiskPolicy)
+        .catch(() => undefined);
     };
 
     loadPortfolio();
@@ -123,6 +131,14 @@ export default function App() {
   const refreshAssetControls = async () => {
     const rows = await fetchAssetControls();
     setAssetControls(rows);
+  };
+
+  const saveRiskPolicy = async (payload: {
+    risk_budget_policy?: "per_symbol" | "portfolio";
+    portfolio_soft_risk_limit_usd?: number;
+  }) => {
+    const next = await updateRiskPolicySettings(payload);
+    setRiskPolicy(next);
   };
 
   const saveAssetControl = async (payload: {
@@ -219,9 +235,11 @@ export default function App() {
           closedTrades={closedTrades}
           totalNetPnl={totalNetPnl}
           assetControls={assetControls}
+          riskPolicy={riskPolicy}
           pnlMode={pnlMode}
           onPnlMode={setPnlMode}
           onSaveAssetControl={saveAssetControl}
+          onSaveRiskPolicy={saveRiskPolicy}
         />
       )}
     </div>

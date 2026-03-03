@@ -99,3 +99,8 @@ export type AssetEngineLog = {
   note?: string | null;
   created_at: string;
 };
+
+export type RiskPolicySettings = {
+  risk_budget_policy: "per_symbol" | "portfolio";
+  portfolio_soft_risk_limit_usd: number;
+};

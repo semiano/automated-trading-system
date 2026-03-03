@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, Candle, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition } from "./types";
+import type { AssetControl, AssetEngineLog, Candle, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
 const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000/api/v1";
 
@@ -112,4 +112,26 @@ export async function fetchAssetLogs(args: { symbol: string; limit?: number }): 
   const response = await fetch(`${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}/logs?${qs({ limit: args.limit ?? 100 })}`);
   if (!response.ok) throw new Error("Failed to fetch asset logs");
   return (await response.json()) as AssetEngineLog[];
+}
+
+export async function fetchRiskPolicySettings(): Promise<RiskPolicySettings> {
+  const response = await fetch(`${BASE}/control-plane/risk-policy`);
+  if (!response.ok) throw new Error("Failed to fetch risk policy settings");
+  return (await response.json()) as RiskPolicySettings;
+}
+
+export async function updateRiskPolicySettings(args: {
+  risk_budget_policy?: "per_symbol" | "portfolio";
+  portfolio_soft_risk_limit_usd?: number;
+}): Promise<RiskPolicySettings> {
+  const response = await fetch(`${BASE}/control-plane/risk-policy`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      risk_budget_policy: args.risk_budget_policy,
+      portfolio_soft_risk_limit_usd: args.portfolio_soft_risk_limit_usd,
+    }),
+  });
+  if (!response.ok) throw new Error("Failed to update risk policy settings");
+  return (await response.json()) as RiskPolicySettings;
 }

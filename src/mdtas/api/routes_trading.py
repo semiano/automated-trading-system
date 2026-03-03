@@ -10,6 +10,8 @@ from mdtas.api.schemas import (
     ClosedTradeOut,
     ClosedTradesResponse,
     OpenPositionOut,
+    RiskPolicyOut,
+    RiskPolicyUpdate,
 )
 from mdtas.config import get_config
 from mdtas.db.session import get_session
@@ -39,6 +41,14 @@ def _validate_trade_side(value: str | None) -> str | None:
         return None
     if value not in {"long_only", "long_short", "short_only"}:
         raise HTTPException(status_code=422, detail="trade_side must be one of: long_only, long_short, short_only")
+    return value
+
+
+def _validate_risk_policy(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if value not in {"per_symbol", "portfolio"}:
+        raise HTTPException(status_code=422, detail="risk_budget_policy must be one of: per_symbol, portfolio")
     return value
 
 
@@ -256,3 +266,26 @@ def list_asset_logs(
         )
         for item in rows
     ]
+
+
+@router.get("/control-plane/risk-policy", response_model=RiskPolicyOut)
+def get_risk_policy_settings():
+    cfg = get_config()
+    return RiskPolicyOut(
+        risk_budget_policy=cfg.trading.risk_budget_policy,
+        portfolio_soft_risk_limit_usd=float(cfg.trading.portfolio_soft_risk_limit_usd),
+    )
+
+
+@router.put("/control-plane/risk-policy", response_model=RiskPolicyOut)
+def update_risk_policy_settings(payload: RiskPolicyUpdate):
+    cfg = get_config()
+    policy = _validate_risk_policy(payload.risk_budget_policy)
+    if policy is not None:
+        cfg.trading.risk_budget_policy = policy
+    if payload.portfolio_soft_risk_limit_usd is not None:
+        cfg.trading.portfolio_soft_risk_limit_usd = float(payload.portfolio_soft_risk_limit_usd)
+    return RiskPolicyOut(
+        risk_budget_policy=cfg.trading.risk_budget_policy,
+        portfolio_soft_risk_limit_usd=float(cfg.trading.portfolio_soft_risk_limit_usd),
+    )
