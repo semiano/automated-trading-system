@@ -10,9 +10,24 @@ __pycache__/
 web/node_modules/
 web/dist/
 web/.env.local
+web/tsconfig.tsbuildinfo
+web/src/**/*.js
+web/src/**/*.js.map
 
 .env
+.env.*
+!.env.example
 *.db
+*.sqlite
+*.sqlite3
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+*.log
 
 .DS_Store
 Thumbs.db
