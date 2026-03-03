@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,12 @@ from mdtas.config import AppConfig, StrategyParamsConfig
 from mdtas.db.repo import CandleRepository
 from mdtas.db.trading_repo import TradingRepository
 from mdtas.indicators.engine import compute
+from mdtas.trading.execution import (
+    PaperExecutionAdapter,
+    SymbolExecutionConstraints,
+    gap_aware_raw_exit_price,
+    round_down_to_step,
+)
 from mdtas.utils.timeframes import timeframe_to_timedelta
 
 logger = logging.getLogger(__name__)
@@ -101,15 +108,67 @@ class TradingRuntime:
         self.candle_repo = candle_repo
         self.trading_repo = trading_repo
         self.params_resolver = AssetParamResolver(cfg)
+        self.execution = PaperExecutionAdapter(slippage_bps=cfg.trading.slippage_bps)
 
     def is_symbol_enabled(self, symbol: str) -> bool:
         control = self.trading_repo.get_or_create_asset_control(
             symbol=symbol,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             default_execution_mode="sim",
+            default_trade_side="long_only",
             default_enabled=True,
         )
         return bool(control.enabled)
+
+    def _constraints_for_symbol(self, symbol: str) -> SymbolExecutionConstraints:
+        default_cfg = self.cfg.trading.default_constraints
+        cfg = self.cfg.trading.per_asset_constraints.get(symbol, default_cfg)
+        return SymbolExecutionConstraints(
+            min_notional_usd=float(cfg.min_notional_usd),
+            qty_step=float(cfg.qty_step),
+            price_tick=float(cfg.price_tick) if cfg.price_tick is not None else None,
+            fee_bps=float(cfg.fee_bps),
+        )
+
+    def _emit_decision_log(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        ts: datetime,
+        decision: str,
+        reasons: list[str],
+    ) -> None:
+        payload = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "ts": ts.isoformat(),
+            "decision": decision,
+            "reasons": reasons,
+            "regime_label": None,
+            "anomaly_flags": [],
+            "rca_event_id": None,
+        }
+        logger.info("decision_event %s", json.dumps(payload, separators=(",", ":"), sort_keys=True))
+
+    def _current_risk_and_limit(self, *, symbol: str, venue: str, timeframe: str, execution_mode: str, per_symbol_limit: float) -> tuple[float, float]:
+        policy = self.cfg.trading.risk_budget_policy
+        if policy == "portfolio":
+            current_risk = self.trading_repo.current_open_risk_usd(
+                symbol=None,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            return float(current_risk), float(self.cfg.trading.portfolio_soft_risk_limit_usd)
+
+        current_risk = self.trading_repo.current_open_risk_usd(
+            symbol=symbol,
+            venue=venue,
+            timeframe=timeframe,
+            execution_mode=execution_mode,
+        )
+        return float(current_risk), float(per_symbol_limit)
 
     def evaluate_symbol(self, symbol: str, venue: str) -> None:
         if not self.cfg.trading.enabled:
@@ -149,7 +208,14 @@ class TradingRuntime:
                 default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="insufficient_bars",
                 note=f"Need more bars for runtime timeframe {timeframe}",
-                log_event=False,
+                log_event=True,
+            )
+            self._emit_decision_log(
+                symbol=symbol,
+                timeframe=timeframe,
+                ts=datetime.utcnow().replace(microsecond=0),
+                decision="hold",
+                reasons=["insufficient_bars"],
             )
             return
 
@@ -168,6 +234,13 @@ class TradingRuntime:
                 symbol,
                 latest_ts.isoformat(),
             )
+            self._emit_decision_log(
+                symbol=symbol,
+                timeframe=timeframe,
+                ts=latest_ts,
+                decision="hold",
+                reasons=["stale_data"],
+            )
             return
 
         indicators = ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"]
@@ -180,14 +253,20 @@ class TradingRuntime:
                 note=f"indicator_rows={len(out)}",
                 log_event=True,
             )
+            self._emit_decision_log(
+                symbol=symbol,
+                timeframe=timeframe,
+                ts=datetime.utcnow().replace(microsecond=0),
+                decision="hold",
+                reasons=["insufficient_signal_rows"],
+            )
             return
 
         prev = out.iloc[-2]
         bar = out.iloc[-1]
         open_position = self.trading_repo.get_open_position(symbol, venue, timeframe, execution_mode)
 
-        fee = self.cfg.trading.fee_bps / 10000.0
-        slippage = self.cfg.trading.slippage_bps / 10000.0
+        constraints = self._constraints_for_symbol(symbol)
 
         if open_position is None:
             long_allowed = trade_side_mode in {"long_only", "long_short"}
@@ -216,34 +295,84 @@ class TradingRuntime:
                     ),
                     log_event=True,
                 )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    decision="hold",
+                    reasons=[f"no_entry_mode={trade_side_mode}", long_note, short_note],
+                )
                 return
 
-            exec_price = float(bar["open"]) * (1.0 + slippage)
-            notional = max(self.cfg.trading.position_size_usd, 1.0)
-            qty = notional / (exec_price * (1.0 + fee))
-            entry_fee = (exec_price * qty) * fee
+            raw_entry_price = float(bar["open"])
+            notional_budget = max(self.cfg.trading.position_size_usd, 1.0)
+            qty = notional_budget / raw_entry_price if raw_entry_price > 0 else 0.0
+            qty = round_down_to_step(qty, constraints.qty_step)
+            if qty <= 0:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="sizing_invalid",
+                    note=f"qty rounded to zero (qty_step={constraints.qty_step})",
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    decision="hold",
+                    reasons=["sizing_invalid"],
+                )
+                return
+
+            entry_fill = self.execution.submit_entry(
+                raw_price=raw_entry_price,
+                qty=qty,
+                trade_side=chosen_side,
+                constraints=constraints,
+            )
+            if constraints.min_notional_usd > 0 and entry_fill.notional_usd < constraints.min_notional_usd:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="min_notional_blocked",
+                    note=(
+                        f"notional={entry_fill.notional_usd:.4f} < min_notional={constraints.min_notional_usd:.4f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    decision="hold",
+                    reasons=["min_notional_blocked"],
+                )
+                return
+
             atr = float(prev["atr"])
             if chosen_side == "short":
-                stop_price = exec_price + (params.stop_atr * atr)
-                take_profit_price = exec_price - (params.take_profit_atr * atr)
-                projected_trade_risk = max(stop_price - exec_price, 0.0) * qty + entry_fee
+                stop_price = entry_fill.price + (params.stop_atr * atr)
+                take_profit_price = entry_fill.price - (params.take_profit_atr * atr)
+                projected_trade_risk = max(stop_price - entry_fill.price, 0.0) * entry_fill.qty + entry_fill.fee_usd
             else:
-                stop_price = exec_price - (params.stop_atr * atr)
-                take_profit_price = exec_price + (params.take_profit_atr * atr)
-                projected_trade_risk = max(exec_price - stop_price, 0.0) * qty + entry_fee
-            soft_limit = float(control.soft_risk_limit_usd)
-            current_risk = self.trading_repo.current_open_risk_usd(
+                stop_price = entry_fill.price - (params.stop_atr * atr)
+                take_profit_price = entry_fill.price + (params.take_profit_atr * atr)
+                projected_trade_risk = max(entry_fill.price - stop_price, 0.0) * entry_fill.qty + entry_fill.fee_usd
+
+            current_risk, risk_limit = self._current_risk_and_limit(
                 symbol=symbol,
                 venue=venue,
                 timeframe=timeframe,
                 execution_mode=execution_mode,
+                per_symbol_limit=float(control.soft_risk_limit_usd),
             )
-            if current_risk + projected_trade_risk > soft_limit:
+            if risk_limit > 0 and current_risk + projected_trade_risk > risk_limit:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
                     default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="risk_blocked",
-                    note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={soft_limit:.4f}",
+                    note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={risk_limit:.4f}",
                     log_event=True,
                 )
                 logger.warning(
@@ -251,7 +380,14 @@ class TradingRuntime:
                     symbol,
                     current_risk,
                     projected_trade_risk,
-                    soft_limit,
+                    risk_limit,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    decision="hold",
+                    reasons=["risk_blocked"],
                 )
                 return
 
@@ -262,9 +398,9 @@ class TradingRuntime:
                 execution_mode=execution_mode,
                 trade_side=chosen_side,
                 entry_ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
-                entry_price=exec_price,
-                qty=qty,
-                entry_fee=entry_fee,
+                entry_price=entry_fill.price,
+                qty=entry_fill.qty,
+                entry_fee=entry_fill.fee_usd,
                 stop_price=stop_price,
                 take_profit_price=take_profit_price,
                 last_price=float(bar["close"]),
@@ -273,7 +409,10 @@ class TradingRuntime:
                 symbol=symbol,
                 default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="position_opened",
-                note=f"mode={execution_mode}, side={chosen_side}, {chosen_note}",
+                note=(
+                    f"mode={execution_mode}, side={chosen_side}, fill={entry_fill.price:.6f}, "
+                    f"qty={entry_fill.qty:.6f}, fee={entry_fill.fee_usd:.6f}; {chosen_note}"
+                ),
                 log_event=True,
             )
             logger.info(
@@ -282,12 +421,19 @@ class TradingRuntime:
                 timeframe,
                 execution_mode,
                 chosen_side,
-                exec_price,
-                qty,
+                entry_fill.price,
+                entry_fill.qty,
+            )
+            self._emit_decision_log(
+                symbol=symbol,
+                timeframe=timeframe,
+                ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                decision="enter_long" if chosen_side == "long" else "enter_short",
+                reasons=[chosen_note],
             )
             return
 
-        self._manage_open_position(open_position, prev, bar, params, fee, slippage)
+        self._manage_open_position(open_position, prev, bar, params, constraints)
 
     def _entry_diagnostics_long(self, prev: pd.Series, params: StrategyParams) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
@@ -347,8 +493,7 @@ class TradingRuntime:
         prev: pd.Series,
         bar: pd.Series,
         params: StrategyParams,
-        fee: float,
-        slippage: float,
+        constraints: SymbolExecutionConstraints,
     ) -> None:
         fast_col = f"ema{params.ema_fast}"
         hold_bars = int(position.hold_bars) + 1
@@ -393,43 +538,66 @@ class TradingRuntime:
                 note=", ".join(summary),
                 log_event=True,
             )
+            self._emit_decision_log(
+                symbol=position.symbol,
+                timeframe=position.timeframe,
+                ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                decision="hold",
+                reasons=["position_held"],
+            )
             return
 
         if stop_hit:
-            raw_exit = float(position.stop_price)
             reason = "stop"
         elif tp_hit:
-            raw_exit = float(position.take_profit_price)
             reason = "take_profit"
         elif indicator_exit:
-            raw_exit = float(bar["open"])
             reason = "signal"
         else:
-            raw_exit = float(bar["open"])
             reason = "max_hold"
 
-        exec_exit = raw_exit * (1.0 - slippage)
-        exit_fee = (exec_exit * float(position.qty)) * fee
+        # Gap-aware exit assumption: if open gaps through stop/TP, fill at the bar open (worse outcome),
+        # otherwise fill at the configured stop/TP threshold for that bar.
+        raw_exit = gap_aware_raw_exit_price(
+            trade_side=position.trade_side,
+            reason=reason,
+            bar_open=float(bar["open"]),
+            stop_price=float(position.stop_price) if position.stop_price is not None else None,
+            take_profit_price=float(position.take_profit_price) if position.take_profit_price is not None else None,
+        )
+        exit_fill = self.execution.submit_exit(
+            raw_price=raw_exit,
+            qty=float(position.qty),
+            trade_side=position.trade_side,
+            constraints=constraints,
+        )
         exit_ts = pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None)
         trade = self.trading_repo.close_position(
             position=position,
             exit_ts=exit_ts,
-            exit_price=exec_exit,
+            exit_price=exit_fill.price,
             exit_reason=reason,
-            exit_fee=exit_fee,
+            exit_fee=exit_fill.fee_usd,
         )
         self.trading_repo.set_asset_state(
             symbol=trade.symbol,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             state="position_closed",
-            note=f"reason={reason}, net_pnl={trade.net_pnl:.6f}",
+            note=f"reason={reason}, side={trade.trade_side}, fill={exit_fill.price:.6f}, net_pnl={trade.net_pnl:.6f}",
             log_event=True,
         )
         logger.info(
             "Closed position %s %s @ %.6f reason=%s net_pnl=%.6f",
             trade.symbol,
             trade.timeframe,
-            exec_exit,
+            exit_fill.price,
             reason,
             trade.net_pnl,
+        )
+        self._emit_decision_log(
+            symbol=trade.symbol,
+            timeframe=trade.timeframe,
+            ts=trade.exit_ts,
+            decision="exit",
+            reasons=[f"reason={reason}", f"side={trade.trade_side}"],
         )

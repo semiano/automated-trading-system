@@ -55,9 +55,22 @@ trading:
   runtime_timeframe: "1m"
   position_size_usd: 100.0
   soft_portfolio_risk_limit_usd: 0.0
+  risk_budget_policy: "per_symbol"
+  portfolio_soft_risk_limit_usd: 0.0
   fee_bps: 6.0
   slippage_bps: 2.0
   tuned_params_path: "artifacts/xrp_tuned_engine_params_selected.yaml"
+  default_constraints:
+    min_notional_usd: 10.0
+    qty_step: 0.0001
+    price_tick: null
+    fee_bps: 6.0
+  per_asset_constraints:
+    XRP/USDT:
+      min_notional_usd: 10.0
+      qty_step: 0.1
+      price_tick: 0.0001
+      fee_bps: 6.0
   default_params:
     rsi_length: 14
     atr_length: 14

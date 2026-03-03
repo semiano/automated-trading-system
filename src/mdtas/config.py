@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -63,16 +63,27 @@ class StrategyParamsConfig(BaseModel):
     max_hold_bars: int = 240
 
 
+class ExecutionConstraintsConfig(BaseModel):
+    min_notional_usd: float = 0.0
+    qty_step: float = 0.0
+    price_tick: float | None = None
+    fee_bps: float = 6.0
+
+
 class TradingConfig(BaseModel):
     enabled: bool = True
     runtime_timeframe: str = "1m"
     position_size_usd: float = 100.0
     soft_portfolio_risk_limit_usd: float = 0.0
+    risk_budget_policy: Literal["per_symbol", "portfolio"] = "per_symbol"
+    portfolio_soft_risk_limit_usd: float = 0.0
     fee_bps: float = 6.0
     slippage_bps: float = 2.0
     tuned_params_path: str = "artifacts/xrp_tuned_engine_params_selected.yaml"
     default_params: StrategyParamsConfig = Field(default_factory=StrategyParamsConfig)
     per_asset_params: dict[str, StrategyParamsConfig] = Field(default_factory=dict)
+    default_constraints: ExecutionConstraintsConfig = Field(default_factory=ExecutionConstraintsConfig)
+    per_asset_constraints: dict[str, ExecutionConstraintsConfig] = Field(default_factory=dict)
 
 
 class AppConfig(BaseModel):

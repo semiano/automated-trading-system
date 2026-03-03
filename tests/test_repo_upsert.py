@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from mdtas.db.repo import CandleDTO, CandleRepository
 from mdtas.db.session import get_session, init_db
@@ -20,7 +20,7 @@ def test_repo_upsert_dedupe():
         low=0.5,
         close=1.5,
         volume=10,
-        ingested_at=datetime.utcnow(),
+        ingested_at=datetime.now(timezone.utc),
     )
     repo.upsert_candles([candle])
     repo.upsert_candles([candle])

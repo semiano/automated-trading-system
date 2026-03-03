@@ -25,6 +25,40 @@ Production-leaning market data service for candle ingestion, local caching, dete
 - Indicators: deterministic pandas/numpy pipeline.
 - Frontend: React + TypeScript + Vite + `lightweight-charts`.
 
+## Simulated execution model
+
+- Runtime uses a paper execution adapter (no live order routing).
+- Slippage is applied by trade action side (BUY increases price, SELL decreases price).
+- Fees are applied on both entry and exit notional using configured `fee_bps` (or per-symbol constraint override).
+- Stop-loss / take-profit exits are gap-aware:
+  - If open gaps through the threshold, exit fills at bar open (worse outcome).
+  - Otherwise, exit fills at the threshold level.
+- Position sizing is rounded down by `qty_step`; entries below `min_notional_usd` are skipped.
+
+### Trading risk and constraints config
+
+```yaml
+trading:
+  risk_budget_policy: "per_symbol" # or "portfolio"
+  portfolio_soft_risk_limit_usd: 0.0 # 0 disables portfolio soft cap
+  slippage_bps: 2.0
+  default_constraints:
+    min_notional_usd: 0.0
+    qty_step: 0.0
+    price_tick: null
+    fee_bps: 6.0
+  per_asset_constraints:
+    XRP/USD:
+      min_notional_usd: 10.0
+      qty_step: 0.1
+      price_tick: 0.0001
+      fee_bps: 6.0
+```
+
+- `risk_budget_policy=per_symbol`: uses each asset control `soft_risk_limit_usd`.
+- `risk_budget_policy=portfolio`: uses global `portfolio_soft_risk_limit_usd` across all open positions.
+- Soft risk limits with value `0` are treated as disabled.
+
 ## Quickstart (mock mode)
 
 ### 1) Python environment
