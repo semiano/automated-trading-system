@@ -5,6 +5,7 @@ type Props = {
   symbol: string;
   timeframe: string;
   rangeDays: number;
+  symbolStatus: Record<string, "stale" | "ok">;
   onSymbol: (symbol: string) => void;
   onTimeframe: (timeframe: string) => void;
   onRangeDays: (days: number) => void;
@@ -18,7 +19,7 @@ export default function SymbolTimeframePicker(props: Props) {
         <select value={props.symbol} onChange={(e) => props.onSymbol(e.target.value)} style={{ marginLeft: 6 }}>
           {props.symbols.map((sym) => (
             <option key={sym} value={sym}>
-              {sym}
+              {sym} {props.symbolStatus[sym] === "stale" ? "🔴 Stale" : "🟢 Up-to-date"}
             </option>
           ))}
         </select>

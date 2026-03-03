@@ -22,9 +22,11 @@ class ProvidersConfig(BaseModel):
 
 class IngestionConfig(BaseModel):
     warmup_bars: int = 2000
-    poll_delay_seconds: int = 3
+    poll_delay_seconds: int = 5
     retries: int = 5
     backoff_seconds: int = 2
+    allow_gap_jump_to_recent: bool = True
+    max_catchup_bars_per_cycle: int = 1200
 
 
 class BollingerConfig(BaseModel):
@@ -49,6 +51,30 @@ class IndicatorConfig(BaseModel):
     vwap_mode: str = "rolling"
 
 
+class StrategyParamsConfig(BaseModel):
+    rsi_length: int = 14
+    atr_length: int = 14
+    ema_fast: int = 20
+    ema_slow: int = 50
+    rsi_entry: float = 32.0
+    rsi_exit: float = 65.0
+    stop_atr: float = 1.5
+    take_profit_atr: float = 2.5
+    max_hold_bars: int = 240
+
+
+class TradingConfig(BaseModel):
+    enabled: bool = True
+    runtime_timeframe: str = "1m"
+    position_size_usd: float = 100.0
+    soft_portfolio_risk_limit_usd: float = 0.0
+    fee_bps: float = 6.0
+    slippage_bps: float = 2.0
+    tuned_params_path: str = "artifacts/xrp_tuned_engine_params_selected.yaml"
+    default_params: StrategyParamsConfig = Field(default_factory=StrategyParamsConfig)
+    per_asset_params: dict[str, StrategyParamsConfig] = Field(default_factory=dict)
+
+
 class AppConfig(BaseModel):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT"])
@@ -58,6 +84,7 @@ class AppConfig(BaseModel):
     )
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
+    trading: TradingConfig = Field(default_factory=TradingConfig)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

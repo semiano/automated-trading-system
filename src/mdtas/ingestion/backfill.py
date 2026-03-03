@@ -60,6 +60,7 @@ def run_backfill(
 
     delta = timeframe_to_timedelta(timeframe)
     page_limit = 1000
+    fetch_pause_seconds = max(1, cfg.ingestion.backoff_seconds)
     cursor = start
     total_inserted = 0
 
@@ -77,6 +78,7 @@ def run_backfill(
         )
         total_inserted += repo.upsert_candles(candles)
         cursor = page_end + delta
+        time.sleep(fetch_pause_seconds)
 
     stored = repo.get_candles(symbol, timeframe, venue, start, end, limit=2_000_000)
     gaps = detect_gaps(stored, timeframe)
@@ -93,6 +95,7 @@ def run_backfill(
             backoff_seconds=cfg.ingestion.backoff_seconds,
         )
         repo.upsert_candles(repaired)
+        time.sleep(fetch_pause_seconds)
 
     final_df = repo.get_candles(symbol, timeframe, venue, start, end, limit=2_000_000)
     unresolved = detect_gaps(final_df, timeframe)

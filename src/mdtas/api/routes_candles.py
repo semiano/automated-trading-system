@@ -24,8 +24,7 @@ def get_repo(session: Session = Depends(get_session)) -> CandleRepository:
 @router.get("/symbols")
 def symbols(repo: CandleRepository = Depends(get_repo)) -> dict:
     cfg = get_config()
-    db_symbols = repo.get_symbols()
-    return {"symbols": sorted(set(cfg.symbols + db_symbols))}
+    return {"symbols": sorted(set(cfg.symbols))}
 
 
 @router.get("/candles", response_model=list[CandleOut])

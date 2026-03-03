@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -47,4 +48,5 @@ def indicators(
     req = _parse_indicators(indicators)
     frame = repo.get_candles(symbol, timeframe, venue, start, end, limit=200000)
     out = compute(frame, req, cfg.indicators.model_dump())
-    return {"rows": out.where(out.notna(), None).to_dict(orient="records")}
+    clean = out.replace([float("inf"), float("-inf")], None)
+    return {"rows": json.loads(clean.to_json(orient="records", date_format="iso"))}

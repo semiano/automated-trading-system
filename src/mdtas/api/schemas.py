@@ -34,3 +34,87 @@ class BackfillResult(BaseModel):
     venue: str
     inserted: int
     remaining_gaps: int
+
+
+class OpenPositionOut(BaseModel):
+    id: int
+    symbol: str
+    venue: str
+    timeframe: str
+    execution_mode: str
+    trade_side: str
+    entry_ts: datetime
+    entry_price: float
+    qty: float
+    stop_price: float | None
+    take_profit_price: float | None
+    hold_bars: int
+    last_price: float | None
+    unrealized_pnl: float | None
+    unrealized_return_pct: float | None
+
+
+class ClosedTradeOut(BaseModel):
+    id: int
+    symbol: str
+    venue: str
+    timeframe: str
+    execution_mode: str
+    trade_side: str
+    entry_ts: datetime
+    exit_ts: datetime
+    entry_price: float
+    exit_price: float
+    qty: float
+    gross_pnl: float
+    fees: float
+    net_pnl: float
+    return_pct: float
+    exit_reason: str
+
+
+class ClosedTradesResponse(BaseModel):
+    count: int
+    total_net_pnl: float
+    total_gross_pnl: float
+    rows: list[ClosedTradeOut]
+
+
+class RiskLimitOut(BaseModel):
+    soft_limit_usd: float
+    current_risk_usd: float
+    remaining_risk_usd: float
+    open_positions: int
+
+
+class RiskLimitUpdate(BaseModel):
+    soft_limit_usd: float = Field(ge=0.0)
+
+
+class AssetControlOut(BaseModel):
+    symbol: str
+    enabled: bool
+    execution_mode: str
+    trade_side: str
+    soft_risk_limit_usd: float
+    current_risk_usd: float
+    last_run_ts: datetime | None
+    next_run_ts: datetime | None
+    last_evaluated_state: str | None
+    last_evaluated_note: str | None
+    tuning_params: dict[str, float | int]
+
+
+class AssetControlUpdate(BaseModel):
+    enabled: bool | None = None
+    execution_mode: str | None = None
+    trade_side: str | None = None
+    soft_risk_limit_usd: float | None = Field(default=None, ge=0.0)
+
+
+class AssetEngineLogOut(BaseModel):
+    id: int
+    symbol: str
+    state: str
+    note: str | None
+    created_at: datetime

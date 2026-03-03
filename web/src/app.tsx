@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchCandles, fetchGaps, fetchIndicators, fetchSymbols } from "./api/client";
-import type { Gap, IndicatorRow } from "./api/types";
+import { fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchSymbols, updateAssetControl } from "./api/client";
+import type { AssetControl, ClosedTrade, Gap, IndicatorRow, OpenPosition } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
+import PortfolioPage from "./components/PortfolioPage";
+import SelectedAssetLivePanel from "./components/SelectedAssetLivePanel";
 import SymbolTimeframePicker from "./components/SymbolTimeframePicker";
 import { useStore } from "./state/store";
 import { toIsoDate } from "./utils/formatting";
@@ -27,6 +29,39 @@ export default function App() {
   const [rows, setRows] = useState<IndicatorRow[]>([]);
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [crosshair, setCrosshair] = useState<IndicatorRow | null>(null);
+  const [view, setView] = useState<"chart" | "portfolio">("chart");
+  const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
+  const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([]);
+  const [totalNetPnl, setTotalNetPnl] = useState(0);
+  const [assetControls, setAssetControls] = useState<AssetControl[]>([]);
+  const [chartOpenPositions, setChartOpenPositions] = useState<OpenPosition[]>([]);
+  const [chartClosedTrades, setChartClosedTrades] = useState<ClosedTrade[]>([]);
+  const [pnlMode, setPnlMode] = useState<"sim" | "live">("sim");
+
+  const activeSymbols = useMemo(() => {
+    if (assetControls.length > 0) {
+      return assetControls.map((row) => row.symbol);
+    }
+    return symbols;
+  }, [assetControls, symbols]);
+
+  const symbolStatus = useMemo<Record<string, "stale" | "ok">>(() => {
+    const out: Record<string, "stale" | "ok"> = {};
+    for (const row of assetControls) {
+      out[row.symbol] = row.last_evaluated_state === "stale_data" || row.last_evaluated_state === "runtime_tf_missing" ? "stale" : "ok";
+    }
+    return out;
+  }, [assetControls]);
+
+  const selectedAssetControl = useMemo(
+    () => assetControls.find((row) => row.symbol === symbol),
+    [assetControls, symbol]
+  );
+
+  const selectedAssetOpenPositions = useMemo(
+    () => chartOpenPositions.filter((row) => row.symbol === symbol),
+    [chartOpenPositions, symbol]
+  );
 
   const timeRange = useMemo(() => {
     const end = new Date();
@@ -53,6 +88,55 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (activeSymbols.length === 0) return;
+    if (!activeSymbols.includes(symbol)) {
+      setSymbol(activeSymbols[0]);
+    }
+  }, [activeSymbols, symbol, setSymbol]);
+
+  useEffect(() => {
+    const loadPortfolio = () => {
+      fetchOpenPositions({ venue, timeframe: "1m" })
+        .then(setOpenPositions)
+        .catch(() => setOpenPositions([]));
+
+      fetchClosedTrades({ venue, timeframe: "1m", execution_mode: pnlMode, limit: 1000 })
+        .then((payload) => {
+          setClosedTrades(payload.rows);
+          setTotalNetPnl(payload.total_net_pnl);
+        })
+        .catch(() => {
+          setClosedTrades([]);
+          setTotalNetPnl(0);
+        });
+
+      fetchAssetControls()
+        .then(setAssetControls)
+        .catch(() => setAssetControls([]));
+    };
+
+    loadPortfolio();
+    const timer = window.setInterval(loadPortfolio, 8000);
+    return () => window.clearInterval(timer);
+  }, [venue, pnlMode]);
+
+  const refreshAssetControls = async () => {
+    const rows = await fetchAssetControls();
+    setAssetControls(rows);
+  };
+
+  const saveAssetControl = async (payload: {
+    symbol: string;
+    enabled?: boolean;
+    execution_mode?: "sim" | "live";
+    trade_side?: "long_only" | "long_short" | "short_only";
+    soft_risk_limit_usd?: number;
+  }) => {
+    await updateAssetControl(payload);
+    await refreshAssetControls();
+  };
+
+  useEffect(() => {
     fetchCandles({
       symbol,
       timeframe,
@@ -77,32 +161,69 @@ export default function App() {
     fetchGaps({ symbol, timeframe, venue, start: timeRange.start, end: timeRange.end })
       .then(setGaps)
       .catch(() => setGaps([]));
+
+    fetchOpenPositions({ symbol, venue, timeframe })
+      .then(setChartOpenPositions)
+      .catch(() => setChartOpenPositions([]));
+
+    fetchClosedTrades({ symbol, venue, timeframe, limit: 1500 })
+      .then((payload) => setChartClosedTrades(payload.rows))
+      .catch(() => setChartClosedTrades([]));
   }, [symbol, timeframe, venue, timeRange.start, timeRange.end, indicatorsArg]);
 
   return (
     <div>
-      <HeaderBar />
-      <SymbolTimeframePicker
-        symbols={symbols}
-        symbol={symbol}
-        timeframe={timeframe}
-        rangeDays={rangeDays}
-        onSymbol={setSymbol}
-        onTimeframe={setTimeframe}
-        onRangeDays={setRangeDays}
-      />
-      <div style={{ display: "flex", gap: 12, padding: "8px 12px", borderBottom: "1px solid #22262f", fontSize: 12 }}>
-        <label><input type="checkbox" checked={overlays.bbands} onChange={() => toggleOverlay("bbands")} /> Bollinger</label>
-        <label><input type="checkbox" checked={overlays.ema20} onChange={() => toggleOverlay("ema20")} /> EMA20</label>
-        <label><input type="checkbox" checked={overlays.ema50} onChange={() => toggleOverlay("ema50")} /> EMA50</label>
-        <label><input type="checkbox" checked={overlays.ema200} onChange={() => toggleOverlay("ema200")} /> EMA200</label>
-        <label><input type="checkbox" checked={panels.rsi} onChange={() => togglePanel("rsi")} /> RSI</label>
-        <label><input type="checkbox" checked={panels.atr} onChange={() => togglePanel("atr")} /> ATR</label>
-        <label><input type="checkbox" checked={panels.bbWidth} onChange={() => togglePanel("bbWidth")} /> BB Width</label>
-        <label><input type="checkbox" checked={panels.volumeProfile} onChange={() => togglePanel("volumeProfile")} /> Volume Profile</label>
-      </div>
+      <HeaderBar view={view} onView={setView} />
 
-      <ChartLayout rows={rows} gaps={gaps} overlays={overlays} panels={panels} crosshair={crosshair} setCrosshair={setCrosshair} />
+      {view === "chart" ? (
+        <>
+          <SymbolTimeframePicker
+            symbols={activeSymbols}
+            symbol={symbol}
+            timeframe={timeframe}
+            rangeDays={rangeDays}
+            symbolStatus={symbolStatus}
+            onSymbol={setSymbol}
+            onTimeframe={setTimeframe}
+            onRangeDays={setRangeDays}
+          />
+          <SelectedAssetLivePanel
+            symbol={symbol}
+            assetControl={selectedAssetControl}
+            openPositions={selectedAssetOpenPositions}
+          />
+          <div style={{ display: "flex", gap: 12, padding: "8px 12px", borderBottom: "1px solid #22262f", fontSize: 12 }}>
+            <label><input type="checkbox" checked={overlays.bbands} onChange={() => toggleOverlay("bbands")} /> Bollinger</label>
+            <label><input type="checkbox" checked={overlays.ema20} onChange={() => toggleOverlay("ema20")} /> EMA20</label>
+            <label><input type="checkbox" checked={overlays.ema50} onChange={() => toggleOverlay("ema50")} /> EMA50</label>
+            <label><input type="checkbox" checked={overlays.ema200} onChange={() => toggleOverlay("ema200")} /> EMA200</label>
+            <label><input type="checkbox" checked={panels.rsi} onChange={() => togglePanel("rsi")} /> RSI</label>
+            <label><input type="checkbox" checked={panels.atr} onChange={() => togglePanel("atr")} /> ATR</label>
+            <label><input type="checkbox" checked={panels.bbWidth} onChange={() => togglePanel("bbWidth")} /> BB Width</label>
+            <label><input type="checkbox" checked={panels.volumeProfile} onChange={() => togglePanel("volumeProfile")} /> Volume Profile</label>
+          </div>
+          <ChartLayout
+            rows={rows}
+            gaps={gaps}
+            overlays={overlays}
+            panels={panels}
+            openPositions={chartOpenPositions}
+            closedTrades={chartClosedTrades}
+            crosshair={crosshair}
+            setCrosshair={setCrosshair}
+          />
+        </>
+      ) : (
+        <PortfolioPage
+          openPositions={openPositions}
+          closedTrades={closedTrades}
+          totalNetPnl={totalNetPnl}
+          assetControls={assetControls}
+          pnlMode={pnlMode}
+          onPnlMode={setPnlMode}
+          onSaveAssetControl={saveAssetControl}
+        />
+      )}
     </div>
   );
 }

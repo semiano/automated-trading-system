@@ -17,3 +17,6 @@ class MarketDataProvider(ABC):
         limit: int,
     ) -> list[CandleDTO]:
         raise NotImplementedError
+
+    def supports_symbol(self, symbol: str) -> bool:
+        return True

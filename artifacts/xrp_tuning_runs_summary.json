@@ -1,0 +1,50 @@
+{
+  "symbol": "XRP/USDT",
+  "venue": "coinbase",
+  "timeframe": "1m",
+  "notes": "Best observed run selected across multiple full tuning passes.",
+  "runs": [
+    {
+      "seed": 42,
+      "coarse_iters": 320,
+      "refine_iters": 260,
+      "rows_used": 5850,
+      "best_robust_score": 16.3506,
+      "best_params": {
+        "rsi_length": 20,
+        "atr_length": 8,
+        "ema_fast": 10,
+        "ema_slow": 50,
+        "rsi_entry": 37.0,
+        "rsi_exit": 67.0,
+        "stop_atr": 1.4,
+        "take_profit_atr": 3.2,
+        "max_hold_bars": 470
+      },
+      "full_metrics": {
+        "score": 20.046628591475194,
+        "total_return": 0.028973906492180124,
+        "max_drawdown": -0.023806833952691897,
+        "sharpe": 9.423823989709346,
+        "trades": 9,
+        "win_rate": 0.4444444444444444
+      }
+    },
+    {
+      "seed": 7,
+      "coarse_iters": 260,
+      "refine_iters": 220,
+      "rows_used": 5849,
+      "best_robust_score": 15.3556
+    },
+    {
+      "seed": 99,
+      "coarse_iters": 260,
+      "refine_iters": 220,
+      "rows_used": 5849,
+      "best_robust_score": 14.9022
+    }
+  ],
+  "selected_seed": 42,
+  "selected_robust_score": 16.3506
+}

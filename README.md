@@ -4,8 +4,8 @@ Production-leaning market data service for candle ingestion, local caching, dete
 
 ## Scope
 
-- Implements: data fetching, cache, dedupe, gap detection/repair, TA APIs, React trading UI.
-- Does **not** implement: order execution, portfolio management, autonomous trading logic.
+- Implements: data fetching, cache, dedupe, gap detection/repair, TA APIs, React trading UI, simulated runtime position lifecycle.
+- Does **not** implement: real exchange order execution.
 
 ## Reasonable defaults used
 
@@ -13,6 +13,7 @@ Production-leaning market data service for candle ingestion, local caching, dete
 - Default venue in mock mode is `mock`; in ccxt mode it uses `providers.ccxt.venue` (`binance` default).
 - API allows `1d` timeframe validation even if not present in default `timeframes` list.
 - Worker recomputes indicator frames in-memory for warmup windows and serves indicators on-demand from `/indicators` and `/features`.
+- Worker includes a simulated strategy runtime with asset-specific parameters and persistent open-position state in SQLite.
 - Optional `indicator_series` table exists but is not enabled for write-through caching in MVP.
 
 ## Architecture
@@ -98,6 +99,10 @@ curl "http://localhost:8000/api/v1/candles?symbol=BTC/USDT&timeframe=5m&venue=mo
 curl "http://localhost:8000/api/v1/indicators?symbol=BTC/USDT&timeframe=5m&venue=mock&indicators=bbands,rsi,atr,ema20"
 curl "http://localhost:8000/api/v1/features?symbol=BTC/USDT&timeframe=5m&venue=mock&indicators=bbands,rsi,atr,ema20,ema50,ema200"
 curl "http://localhost:8000/api/v1/gaps?symbol=BTC/USDT&timeframe=5m&venue=mock"
+curl "http://localhost:8000/api/v1/positions/open?venue=coinbase&timeframe=1m"
+curl "http://localhost:8000/api/v1/trades/closed?venue=coinbase&timeframe=1m&limit=200"
+curl "http://localhost:8000/api/v1/portfolio/risk-limit?venue=coinbase&timeframe=1m"
+curl -X PUT "http://localhost:8000/api/v1/portfolio/risk-limit?venue=coinbase&timeframe=1m" -H "Content-Type: application/json" -d '{"soft_limit_usd":150}'
 curl -X POST "http://localhost:8000/api/v1/backfill" -H "Content-Type: application/json" -d '{"symbols":["BTC/USDT"],"timeframes":["5m"],"lookback_days":7}'
 ```
 

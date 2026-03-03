@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from mdtas.db.models import Candle, UnresolvedGap
@@ -33,6 +33,15 @@ class GapDTO:
 class CandleRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def get_latest_candle_ts(self, symbol: str, timeframe: str, venue: str) -> datetime | None:
+        return self.session.scalar(
+            select(func.max(Candle.ts)).where(
+                Candle.symbol == symbol,
+                Candle.timeframe == timeframe,
+                Candle.venue == venue,
+            )
+        )
 
     def upsert_candles(self, candles: list[CandleDTO]) -> int:
         if not candles:
@@ -82,6 +91,7 @@ class CandleRepository:
         start: datetime | None,
         end: datetime | None,
         limit: int,
+        latest: bool = False,
     ) -> pd.DataFrame:
         clauses = [
             Candle.symbol == symbol,
@@ -93,18 +103,17 @@ class CandleRepository:
         if end:
             clauses.append(Candle.ts <= end)
 
-        stmt = (
-            select(Candle)
-            .where(and_(*clauses))
-            .order_by(Candle.ts.asc())
-            .limit(limit)
-        )
+        order = Candle.ts.desc() if latest else Candle.ts.asc()
+        stmt = select(Candle).where(and_(*clauses)).order_by(order).limit(limit)
 
         rows = self.session.scalars(stmt).all()
         if not rows:
             return pd.DataFrame(
                 columns=["ts", "open", "high", "low", "close", "volume", "symbol", "venue", "timeframe"]
             )
+
+        if latest:
+            rows.reverse()
 
         data = [
             {

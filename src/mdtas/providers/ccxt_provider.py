@@ -14,6 +14,16 @@ class CcxtProvider(MarketDataProvider):
         venue_cls = getattr(ccxt, venue)
         self.exchange = venue_cls({"enableRateLimit": rate_limit})
         self.venue = venue
+        self._markets_loaded = False
+
+    def _ensure_markets_loaded(self) -> None:
+        if not self._markets_loaded:
+            self.exchange.load_markets()
+            self._markets_loaded = True
+
+    def supports_symbol(self, symbol: str) -> bool:
+        self._ensure_markets_loaded()
+        return symbol in self.exchange.markets
 
     def fetch_ohlcv(
         self,
@@ -23,6 +33,7 @@ class CcxtProvider(MarketDataProvider):
         end_ts: datetime,
         limit: int,
     ) -> list[CandleDTO]:
+        self._ensure_markets_loaded()
         tf_delta = timeframe_to_timedelta(timeframe)
         since_ms = int(start_ts.replace(tzinfo=timezone.utc).timestamp() * 1000)
         rows = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)

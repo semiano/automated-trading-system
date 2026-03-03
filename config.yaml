@@ -1,12 +1,20 @@
 providers:
-  default_provider: "mock"
+  default_provider: "ccxt"
   ccxt:
-    venue: "binance"
+    venue: "coinbase"
     rate_limit: true
 
 symbols:
   - "BTC/USDT"
   - "ETH/USDT"
+  - "DOGE/USDT"
+  - "DOT/USDT"
+  - "HBAR/USDT"
+  - "ICP/USDT"
+  - "JASMY/USDT"
+  - "QNT/USDT"
+  - "XLM/USDT"
+  - "XRP/USDT"
 
 timeframes:
   - "1m"
@@ -21,9 +29,11 @@ cache_horizon_days:
 
 ingestion:
   warmup_bars: 2000
-  poll_delay_seconds: 3
+  poll_delay_seconds: 5
   retries: 5
   backoff_seconds: 2
+  allow_gap_jump_to_recent: true
+  max_catchup_bars_per_cycle: 1200
 
 indicators:
   bollinger:
@@ -39,3 +49,33 @@ indicators:
     - 200
   volume_sma: 20
   vwap_mode: "rolling"
+
+trading:
+  enabled: true
+  runtime_timeframe: "1m"
+  position_size_usd: 100.0
+  soft_portfolio_risk_limit_usd: 0.0
+  fee_bps: 6.0
+  slippage_bps: 2.0
+  tuned_params_path: "artifacts/xrp_tuned_engine_params_selected.yaml"
+  default_params:
+    rsi_length: 14
+    atr_length: 14
+    ema_fast: 20
+    ema_slow: 50
+    rsi_entry: 32.0
+    rsi_exit: 65.0
+    stop_atr: 1.5
+    take_profit_atr: 2.5
+    max_hold_bars: 240
+  per_asset_params:
+    XRP/USDT:
+      rsi_length: 20
+      atr_length: 8
+      ema_fast: 10
+      ema_slow: 50
+      rsi_entry: 37
+      rsi_exit: 67
+      stop_atr: 1.4
+      take_profit_atr: 3.2
+      max_hold_bars: 470

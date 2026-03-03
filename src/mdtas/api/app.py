@@ -8,6 +8,7 @@ from mdtas.api.routes_features import router as features_router
 from mdtas.api.routes_gaps import router as gaps_router
 from mdtas.api.routes_health import router as health_router
 from mdtas.api.routes_indicators import router as indicators_router
+from mdtas.api.routes_trading import router as trading_router
 from mdtas.db.session import init_db
 from mdtas.logging import setup_logging
 
@@ -34,3 +35,4 @@ app.include_router(candles_router, prefix="/api/v1")
 app.include_router(indicators_router, prefix="/api/v1")
 app.include_router(features_router, prefix="/api/v1")
 app.include_router(gaps_router, prefix="/api/v1")
+app.include_router(trading_router, prefix="/api/v1")

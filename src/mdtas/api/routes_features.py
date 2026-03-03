@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -75,4 +76,5 @@ def features(
     out = compute(frame, requested, cfg.indicators.model_dump())
     if format != "json":
         raise HTTPException(status_code=422, detail="Only format=json is supported in MVP")
-    return {"rows": out.where(out.notna(), None).to_dict(orient="records")}
+    clean = out.replace([float("inf"), float("-inf")], None)
+    return {"rows": json.loads(clean.to_json(orient="records", date_format="iso"))}

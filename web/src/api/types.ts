@@ -26,3 +26,76 @@ export type Gap = {
   start_ts: string;
   end_ts: string;
 };
+
+export type OpenPosition = {
+  id: number;
+  symbol: string;
+  venue: string;
+  timeframe: string;
+  execution_mode: "sim" | "live";
+  trade_side: "long" | "short";
+  entry_ts: string;
+  entry_price: number;
+  qty: number;
+  stop_price?: number | null;
+  take_profit_price?: number | null;
+  hold_bars: number;
+  last_price?: number | null;
+  unrealized_pnl?: number | null;
+  unrealized_return_pct?: number | null;
+};
+
+export type ClosedTrade = {
+  id: number;
+  symbol: string;
+  venue: string;
+  timeframe: string;
+  execution_mode: "sim" | "live";
+  trade_side: "long" | "short";
+  entry_ts: string;
+  exit_ts: string;
+  entry_price: number;
+  exit_price: number;
+  qty: number;
+  gross_pnl: number;
+  fees: number;
+  net_pnl: number;
+  return_pct: number;
+  exit_reason: string;
+};
+
+export type ClosedTradesResponse = {
+  count: number;
+  total_net_pnl: number;
+  total_gross_pnl: number;
+  rows: ClosedTrade[];
+};
+
+export type PortfolioRiskLimit = {
+  soft_limit_usd: number;
+  current_risk_usd: number;
+  remaining_risk_usd: number;
+  open_positions: number;
+};
+
+export type AssetControl = {
+  symbol: string;
+  enabled: boolean;
+  execution_mode: "sim" | "live";
+  trade_side: "long_only" | "long_short" | "short_only";
+  soft_risk_limit_usd: number;
+  current_risk_usd: number;
+  last_run_ts?: string | null;
+  next_run_ts?: string | null;
+  last_evaluated_state?: string | null;
+  last_evaluated_note?: string | null;
+  tuning_params: Record<string, number>;
+};
+
+export type AssetEngineLog = {
+  id: number;
+  symbol: string;
+  state: string;
+  note?: string | null;
+  created_at: string;
+};

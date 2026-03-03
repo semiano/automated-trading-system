@@ -31,7 +31,7 @@ type AppState = {
 export const useStore = create<AppState>((set) => ({
   symbol: "BTC/USDT",
   timeframe: "5m",
-  venue: "mock",
+  venue: "coinbase",
   rangeDays: 7,
   overlays: {
     bbands: true,
@@ -41,8 +41,8 @@ export const useStore = create<AppState>((set) => ({
   },
   panels: {
     rsi: true,
-    atr: false,
-    bbWidth: false,
+    atr: true,
+    bbWidth: true,
     volumeProfile: true,
   },
   setSymbol: (symbol) => set({ symbol }),
