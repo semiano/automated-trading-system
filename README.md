@@ -98,6 +98,20 @@ bash ../scripts/run_web.sh
 
 Open `http://localhost:5173`.
 
+### Windows deterministic startup (recommended)
+
+Use PowerShell scripts that stop stale dev processes first, then start a single API, worker, and web server on fixed ports.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_dev_stack.ps1
+```
+
+To stop all dev services:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\stop_dev_stack.ps1
+```
+
 ## Enable ccxt provider
 
 1. Set in `config.yaml`:

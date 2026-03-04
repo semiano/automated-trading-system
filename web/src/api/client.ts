@@ -1,6 +1,10 @@
 import type { AssetControl, AssetEngineLog, Candle, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
-const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000/api/v1";
+const DEV_BASE = "http://localhost:8000/api/v1";
+const BASE = import.meta.env.DEV
+  ? DEV_BASE
+  : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEV_BASE);
+export const API_BASE_URL = BASE;
 
 function qs(params: Record<string, string | number | undefined>) {
   const out = new URLSearchParams();

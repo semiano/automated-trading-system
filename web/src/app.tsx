@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
+import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
 import type { AssetControl, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
@@ -37,6 +37,8 @@ export default function App() {
   const [chartOpenPositions, setChartOpenPositions] = useState<OpenPosition[]>([]);
   const [chartClosedTrades, setChartClosedTrades] = useState<ClosedTrade[]>([]);
   const [pnlMode, setPnlMode] = useState<"sim" | "live">("sim");
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  const [portfolioInfo, setPortfolioInfo] = useState<string | null>(null);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicySettings>({
     risk_budget_policy: "per_symbol",
     portfolio_soft_risk_limit_usd: 0,
@@ -99,28 +101,68 @@ export default function App() {
   }, [activeSymbols, symbol, setSymbol]);
 
   useEffect(() => {
-    const loadPortfolio = () => {
-      fetchOpenPositions({ venue, timeframe: "1m" })
-        .then(setOpenPositions)
-        .catch(() => setOpenPositions([]));
+    const loadPortfolio = async () => {
+      const failed: string[] = [];
 
-      fetchClosedTrades({ venue, timeframe: "1m", execution_mode: pnlMode, limit: 1000 })
-        .then((payload) => {
+      await fetchOpenPositions({ venue, timeframe: "1m" })
+        .then(setOpenPositions)
+        .catch(() => {
+          setOpenPositions([]);
+          failed.push("open positions");
+        });
+
+      await fetchClosedTrades({ venue, timeframe: "1m", execution_mode: pnlMode, limit: 1000 })
+        .then(async (payload) => {
           setClosedTrades(payload.rows);
           setTotalNetPnl(payload.total_net_pnl);
+
+          if (pnlMode === "live" && payload.rows.length === 0) {
+            try {
+              const simPayload = await fetchClosedTrades({
+                venue,
+                timeframe: "1m",
+                execution_mode: "sim",
+                limit: 1000,
+              });
+              if (simPayload.rows.length > 0) {
+                setPortfolioInfo(
+                  `No closed trades in live mode. ${simPayload.rows.length} closed trade(s) exist in sim mode.`
+                );
+              } else {
+                setPortfolioInfo(null);
+              }
+            } catch {
+              setPortfolioInfo(null);
+            }
+          } else {
+            setPortfolioInfo(null);
+          }
         })
         .catch(() => {
           setClosedTrades([]);
           setTotalNetPnl(0);
+          failed.push("closed trades");
+          setPortfolioInfo(null);
         });
 
-      fetchAssetControls()
+      await fetchAssetControls()
         .then(setAssetControls)
-        .catch(() => setAssetControls([]));
+        .catch(() => {
+          setAssetControls([]);
+          failed.push("asset controls");
+        });
 
-      fetchRiskPolicySettings()
+      await fetchRiskPolicySettings()
         .then(setRiskPolicy)
-        .catch(() => undefined);
+        .catch(() => {
+          failed.push("risk policy");
+        });
+
+      if (failed.length > 0) {
+        setPortfolioError(`Control plane fetch failed: ${failed.join(", ")}. API base: ${API_BASE_URL}`);
+      } else {
+        setPortfolioError(null);
+      }
     };
 
     loadPortfolio();
@@ -190,6 +232,24 @@ export default function App() {
   return (
     <div>
       <HeaderBar view={view} onView={setView} />
+
+      {portfolioError ? (
+        <div style={{ margin: "10px 12px", padding: "8px 10px", borderRadius: 6, border: "1px solid #5b1f1f", background: "#2b1111", color: "#f2b8b5", fontSize: 12 }}>
+          {portfolioError}
+        </div>
+      ) : null}
+
+      {!portfolioError && portfolioInfo ? (
+        <div style={{ margin: "10px 12px", padding: "8px 10px", borderRadius: 6, border: "1px solid #1f3f5b", background: "#0f2433", color: "#b8dfff", fontSize: 12 }}>
+          {portfolioInfo}
+        </div>
+      ) : null}
+
+      {view === "portfolio" && !portfolioError && assetControls.length === 0 ? (
+        <div style={{ margin: "10px 12px", padding: "8px 10px", borderRadius: 6, border: "1px solid #4a3a18", background: "#2a2312", color: "#f0d28a", fontSize: 12 }}>
+          Control plane returned no assets. Verify API is running and symbols are configured.
+        </div>
+      ) : null}
 
       {view === "chart" ? (
         <>

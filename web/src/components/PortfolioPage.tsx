@@ -127,6 +127,14 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   }, [closedTrades]);
 
   const pnlPoints = useMemo(() => toPoints(cumulative, 860, 160), [cumulative]);
+  const singlePnlPoint = useMemo(() => {
+    if (cumulative.length !== 1) return null;
+    const [xRaw, yRaw] = pnlPoints.split(",");
+    const x = Number(xRaw);
+    const y = Number(yRaw);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }, [cumulative.length, pnlPoints]);
 
   return (
     <div style={{ padding: 12, display: "grid", gap: 14 }}>
@@ -600,7 +608,11 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             <div style={{ fontSize: 12 }}>No closed trades yet.</div>
           ) : (
             <svg width="100%" viewBox="0 0 860 170" style={{ display: "block", background: "#0f131c", borderRadius: 6 }}>
-              <polyline points={pnlPoints} fill="none" stroke="#4ea1ff" strokeWidth={2} />
+              {singlePnlPoint ? (
+                <circle cx={singlePnlPoint.x} cy={singlePnlPoint.y} r={4} fill="#4ea1ff" />
+              ) : (
+                <polyline points={pnlPoints} fill="none" stroke="#4ea1ff" strokeWidth={2} />
+              )}
             </svg>
           )}
         </div>
