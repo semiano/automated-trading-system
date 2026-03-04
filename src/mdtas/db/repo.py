@@ -183,3 +183,12 @@ class CandleRepository:
             select(UnresolvedGap).where(and_(*clauses)).order_by(UnresolvedGap.start_ts.asc())
         ).all()
         return [GapDTO(start_ts=row.start_ts, end_ts=row.end_ts) for row in rows]
+
+    def get_latest_unresolved_gap_noted_at(self, symbol: str, timeframe: str, venue: str) -> datetime | None:
+        return self.session.scalar(
+            select(func.max(UnresolvedGap.noted_at)).where(
+                UnresolvedGap.symbol == symbol,
+                UnresolvedGap.timeframe == timeframe,
+                UnresolvedGap.venue == venue,
+            )
+        )

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
-import type { AssetControl, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
+import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
+import type { AssetControl, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
+import IngestionStatusPage from "./components/IngestionStatusPage";
 import PortfolioPage from "./components/PortfolioPage";
 import SelectedAssetLivePanel from "./components/SelectedAssetLivePanel";
 import SymbolTimeframePicker from "./components/SymbolTimeframePicker";
@@ -29,7 +30,7 @@ export default function App() {
   const [rows, setRows] = useState<IndicatorRow[]>([]);
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [crosshair, setCrosshair] = useState<IndicatorRow | null>(null);
-  const [view, setView] = useState<"chart" | "portfolio">("chart");
+  const [view, setView] = useState<"chart" | "portfolio" | "ingestion">("chart");
   const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
   const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([]);
   const [totalNetPnl, setTotalNetPnl] = useState(0);
@@ -43,6 +44,9 @@ export default function App() {
     risk_budget_policy: "per_symbol",
     portfolio_soft_risk_limit_usd: 0,
   });
+  const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
+  const [catchupError, setCatchupError] = useState<string | null>(null);
+  const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
 
   const activeSymbols = useMemo(() => {
     if (assetControls.length > 0) {
@@ -170,6 +174,24 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [venue, pnlMode]);
 
+  useEffect(() => {
+    const loadCatchup = async () => {
+      try {
+        const rows = await fetchCatchupStatus({ venue });
+        setCatchupRows(rows);
+        setCatchupError(null);
+        setCatchupUpdatedAt(new Date());
+      } catch {
+        setCatchupRows([]);
+        setCatchupError(`Failed to fetch ingestion catchup status. API base: ${API_BASE_URL}`);
+      }
+    };
+
+    loadCatchup();
+    const timer = window.setInterval(loadCatchup, 5000);
+    return () => window.clearInterval(timer);
+  }, [venue]);
+
   const refreshAssetControls = async () => {
     const rows = await fetchAssetControls();
     setAssetControls(rows);
@@ -289,7 +311,7 @@ export default function App() {
             setCrosshair={setCrosshair}
           />
         </>
-      ) : (
+      ) : view === "portfolio" ? (
         <PortfolioPage
           openPositions={openPositions}
           closedTrades={closedTrades}
@@ -301,6 +323,8 @@ export default function App() {
           onSaveAssetControl={saveAssetControl}
           onSaveRiskPolicy={saveRiskPolicy}
         />
+      ) : (
+        <IngestionStatusPage rows={catchupRows} error={catchupError} updatedAt={catchupUpdatedAt} />
       )}
     </div>
   );

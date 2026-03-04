@@ -128,3 +128,21 @@ class AssetEngineLogOut(BaseModel):
     state: str
     note: str | None
     created_at: datetime
+
+
+class CatchupStatusOut(BaseModel):
+    symbol: str
+    timeframe: str
+    venue: str
+    latest_ts: datetime | None
+    target_end_ts: datetime
+    attempted_start_ts: datetime | None
+    attempted_end_ts: datetime | None
+    bars_behind_before_jump: int
+    bars_attempted_this_cycle: int
+    remaining_after_attempt_bars: int
+    catchup_progress_pct: float
+    unresolved_gap_count: int
+    unresolved_gap_bars_estimate: int
+    last_gap_scan_ts: datetime | None
+    is_caught_up: bool

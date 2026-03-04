@@ -22,6 +22,7 @@ class ProvidersConfig(BaseModel):
 
 class IngestionConfig(BaseModel):
     warmup_bars: int = 2000
+    warmup_bars_per_cycle_cap: int = 1000
     poll_delay_seconds: int = 5
     retries: int = 5
     backoff_seconds: int = 2
@@ -127,5 +128,9 @@ def get_config() -> AppConfig:
 
 
 def get_db_url() -> str:
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url
+
     db_path = os.getenv("MDTAS_DB_PATH", "./mdtas.db")
     return f"sqlite:///{db_path}"

@@ -1,9 +1,6 @@
-import type { AssetControl, AssetEngineLog, Candle, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
-const DEV_BASE = "http://localhost:8000/api/v1";
-const BASE = import.meta.env.DEV
-  ? DEV_BASE
-  : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEV_BASE);
+const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api/v1";
 export const API_BASE_URL = BASE;
 
 function qs(params: Record<string, string | number | undefined>) {
@@ -138,4 +135,14 @@ export async function updateRiskPolicySettings(args: {
   });
   if (!response.ok) throw new Error("Failed to update risk policy settings");
   return (await response.json()) as RiskPolicySettings;
+}
+
+export async function fetchCatchupStatus(args: {
+  symbol?: string;
+  timeframe?: string;
+  venue?: string;
+} = {}): Promise<CatchupStatusRow[]> {
+  const response = await fetch(`${BASE}/ingestion/catchup-status?${qs(args)}`);
+  if (!response.ok) throw new Error("Failed to fetch ingestion catchup status");
+  return (await response.json()) as CatchupStatusRow[];
 }

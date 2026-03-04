@@ -5,15 +5,7 @@ providers:
     rate_limit: true
 
 symbols:
-  - "BTC/USDT"
-  - "ETH/USDT"
-  - "DOGE/USDT"
-  - "DOT/USDT"
   - "HBAR/USDT"
-  - "ICP/USDT"
-  - "JASMY/USDT"
-  - "QNT/USDT"
-  - "XLM/USDT"
   - "XRP/USDT"
 
 timeframes:

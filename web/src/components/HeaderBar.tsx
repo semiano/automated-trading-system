@@ -1,8 +1,8 @@
 import React from "react";
 
 type Props = {
-  view: "chart" | "portfolio";
-  onView: (view: "chart" | "portfolio") => void;
+  view: "chart" | "portfolio" | "ingestion";
+  onView: (view: "chart" | "portfolio" | "ingestion") => void;
 };
 
 export default function HeaderBar({ view, onView }: Props) {
@@ -37,6 +37,20 @@ export default function HeaderBar({ view, onView }: Props) {
           }}
         >
           Portfolio
+        </button>
+        <button
+          type="button"
+          onClick={() => onView("ingestion")}
+          style={{
+            padding: "4px 10px",
+            borderRadius: 4,
+            border: "1px solid #2d3340",
+            background: view === "ingestion" ? "#2d3340" : "transparent",
+            color: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          Ingestion
         </button>
       </div>
     </div>

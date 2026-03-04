@@ -104,3 +104,21 @@ export type RiskPolicySettings = {
   risk_budget_policy: "per_symbol" | "portfolio";
   portfolio_soft_risk_limit_usd: number;
 };
+
+export type CatchupStatusRow = {
+  symbol: string;
+  timeframe: string;
+  venue: string;
+  latest_ts?: string | null;
+  target_end_ts: string;
+  attempted_start_ts?: string | null;
+  attempted_end_ts?: string | null;
+  bars_behind_before_jump: number;
+  bars_attempted_this_cycle: number;
+  remaining_after_attempt_bars: number;
+  catchup_progress_pct: number;
+  unresolved_gap_count: number;
+  unresolved_gap_bars_estimate: number;
+  last_gap_scan_ts?: string | null;
+  is_caught_up: boolean;
+};
