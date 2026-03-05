@@ -167,7 +167,7 @@ class CoinbaseWsTradeStream:
                     on_error=_on_error,
                     on_close=_on_close,
                 )
-                self._app.run_forever(ping_interval=20, ping_timeout=10)
+                self._app.run_forever(ping_interval=0)
 
                 if self._stop_event.is_set() or not should_continue():
                     break
