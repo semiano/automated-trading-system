@@ -22,8 +22,9 @@ def test_parse_match_message_to_trade():
         }
     )
 
-    trade = stream._parse_message(message)
-    assert trade is not None
+    trades = stream._parse_message(message)
+    assert len(trades) == 1
+    trade = trades[0]
     assert trade.symbol == "XRP/USDT"
     assert trade.price == 1.2345
     assert trade.size == 100.5
@@ -33,4 +34,33 @@ def test_parse_match_message_to_trade():
 def test_parse_non_match_message_ignored():
     stream = CoinbaseWsTradeStream(symbols=["XRP/USDT"])
     message = json.dumps({"type": "subscriptions", "channels": []})
-    assert stream._parse_message(message) is None
+    assert stream._parse_message(message) == []
+
+
+def test_parse_advanced_market_trades_message():
+    stream = CoinbaseWsTradeStream(symbols=["XRP/USDT"])
+    message = json.dumps(
+        {
+            "channel": "market_trades",
+            "events": [
+                {
+                    "type": "update",
+                    "trades": [
+                        {
+                            "product_id": "XRP-USDT",
+                            "price": "1.2345",
+                            "size": "12.5",
+                            "time": "2026-03-05T15:10:11.123456Z",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    trades = stream._parse_message(message)
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade.symbol == "XRP/USDT"
+    assert trade.price == 1.2345
+    assert trade.size == 12.5
+    assert trade.ts > 0
