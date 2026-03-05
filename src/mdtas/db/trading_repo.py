@@ -120,18 +120,20 @@ class TradingRepository:
         note: str | None = None,
         log_event: bool = True,
     ) -> AssetControl:
+        note_for_control = note[:256] if note is not None else None
+        note_for_log = note[:512] if note is not None else None
         item = self.get_or_create_asset_control(
             symbol=symbol,
             default_soft_risk_limit_usd=default_soft_risk_limit_usd,
         )
         item.last_evaluated_state = state
-        item.last_evaluated_note = note
+        item.last_evaluated_note = note_for_control
         if log_event:
             self.session.add(
                 AssetEngineLog(
                     symbol=symbol,
                     state=state,
-                    note=note,
+                    note=note_for_log,
                 )
             )
         self.session.commit()

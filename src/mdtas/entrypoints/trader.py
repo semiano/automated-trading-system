@@ -92,6 +92,7 @@ def main() -> None:
                 try:
                     runtime.evaluate_symbol(symbol=symbol, venue=venue)
                 except Exception as exc:  # noqa: BLE001
+                    session.rollback()
                     logger.exception("Trading runtime failed for %s: %s", symbol, exc)
             time.sleep(max(1, cfg.ingestion.poll_delay_seconds))
     finally:
