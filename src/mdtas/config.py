@@ -25,6 +25,10 @@ class ProvidersConfig(BaseModel):
 
 
 class IngestionConfig(BaseModel):
+    mode: Literal["rest", "ws_trades"] = "rest"
+    ws_rollup_timeframes: list[Literal["5m", "1h"]] = Field(default_factory=lambda: ["5m", "1h"])
+    ws_reconnect_initial_backoff_seconds: int = 1
+    ws_reconnect_max_backoff_seconds: int = 30
     warmup_bars: int = 2000
     warmup_bars_per_cycle_cap: int = 1000
     poll_delay_seconds: int = 5
@@ -32,6 +36,9 @@ class IngestionConfig(BaseModel):
     backoff_seconds: int = 2
     allow_gap_jump_to_recent: bool = True
     max_catchup_bars_per_cycle: int = 1200
+    gap_repair_enabled: bool = True
+    gap_repair_max_minutes: int = 240
+    gap_repair_backoff_seconds: int = 5
 
 
 class BollingerConfig(BaseModel):

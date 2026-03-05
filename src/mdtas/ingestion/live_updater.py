@@ -3,16 +3,214 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 from mdtas.config import AppConfig
-from mdtas.db.repo import CandleRepository
+from mdtas.db.repo import CandleDTO, CandleRepository
+from mdtas.ingestion.gaps import detect_gaps
+from mdtas.ingestion.rollup import rollup_candles
+from mdtas.ingestion.trade_aggregator import Candle as AggCandle
+from mdtas.ingestion.trade_aggregator import Trade, TradeToCandleAggregator
 from mdtas.indicators.engine import compute as compute_indicators
 from mdtas.providers.base import MarketDataProvider
+from mdtas.providers.coinbase_ws_provider import CoinbaseWsTradeStream
 from mdtas.trading.runtime import TradingRuntime
 from mdtas.utils.timeframes import align_to_candle_close, timeframe_to_timedelta
 
 logger = logging.getLogger(__name__)
+
+
+def _agg_to_dto(candle: AggCandle, venue: str) -> CandleDTO:
+    return CandleDTO(
+        symbol=candle.symbol,
+        venue=venue,
+        timeframe=candle.timeframe,
+        ts=datetime.utcfromtimestamp(candle.ts_close / 1000).replace(microsecond=0),
+        open=float(candle.open),
+        high=float(candle.high),
+        low=float(candle.low),
+        close=float(candle.close),
+        volume=float(candle.volume),
+        ingested_at=datetime.utcnow().replace(microsecond=0),
+    )
+
+
+def _retry_fetch(
+    provider: MarketDataProvider,
+    symbol: str,
+    timeframe: str,
+    start_ts: datetime,
+    end_ts: datetime,
+    limit: int,
+    retries: int,
+    backoff_seconds: int,
+) -> list[CandleDTO]:
+    last_exc: Exception | None = None
+    for attempt in range(max(1, retries)):
+        try:
+            return provider.fetch_ohlcv(symbol, timeframe, start_ts, end_ts, limit)
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt + 1 >= max(1, retries):
+                break
+            sleep_s = max(1, backoff_seconds) * (2**attempt)
+            logger.warning("WS repair fetch failed (%s), retry in %ss", exc, sleep_s)
+            time.sleep(sleep_s)
+    if last_exc is not None:
+        raise last_exc
+    return []
+
+
+def _ws_warmup_from_rest(repo: CandleRepository, provider: MarketDataProvider, cfg: AppConfig, symbols: list[str], venue: str) -> None:
+    now = datetime.utcnow().replace(microsecond=0)
+    tf = "1m"
+    tf_delta = timeframe_to_timedelta(tf)
+    end = align_to_candle_close(now, tf) - tf_delta
+    warmup_bars = max(50, min(cfg.ingestion.warmup_bars, cfg.ingestion.warmup_bars_per_cycle_cap))
+    start = end - tf_delta * (warmup_bars - 1)
+    limit = max(200, warmup_bars + 10)
+
+    for symbol in symbols:
+        candles = _retry_fetch(
+            provider=provider,
+            symbol=symbol,
+            timeframe=tf,
+            start_ts=start,
+            end_ts=end,
+            limit=limit,
+            retries=cfg.ingestion.retries,
+            backoff_seconds=cfg.ingestion.backoff_seconds,
+        )
+        if candles:
+            repo.upsert_candles(candles)
+
+        if not cfg.ingestion.ws_rollup_timeframes:
+            continue
+
+        frame = repo.get_candles(symbol=symbol, timeframe="1m", venue=venue, start=start, end=end, limit=warmup_bars + 200)
+        if frame.empty:
+            continue
+
+        agg_rows = [
+            AggCandle(
+                symbol=symbol,
+                timeframe="1m",
+                ts_close=int(pd.to_datetime(row["ts"]).to_pydatetime().replace(tzinfo=timezone.utc).timestamp() * 1000),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+            )
+            for _, row in frame.iterrows()
+        ]
+
+        for target_tf in cfg.ingestion.ws_rollup_timeframes:
+            rolled = rollup_candles(agg_rows, target_tf)
+            if rolled:
+                repo.upsert_candles([_agg_to_dto(item, venue) for item in rolled])
+
+
+def _detect_missing_1m_intervals(repo: CandleRepository, symbol: str, venue: str, lookback_limit: int = 240) -> list[tuple[datetime, datetime]]:
+    frame = repo.get_candles(symbol=symbol, timeframe="1m", venue=venue, start=None, end=None, limit=lookback_limit, latest=True)
+    gaps = detect_gaps(frame, "1m")
+    return [(gap.start_ts, gap.end_ts) for gap in gaps]
+
+
+def _repair_gaps_from_rest(
+    repo: CandleRepository,
+    provider: MarketDataProvider,
+    cfg: AppConfig,
+    symbol: str,
+    venue: str,
+    intervals: list[tuple[datetime, datetime]],
+) -> None:
+    if not intervals or not cfg.ingestion.gap_repair_enabled:
+        return
+
+    minute = timeframe_to_timedelta("1m")
+    max_minutes = max(1, cfg.ingestion.gap_repair_max_minutes)
+    for start_ts, end_ts in intervals:
+        missing_minutes = int(((end_ts - start_ts) / minute)) + 1
+        if missing_minutes > max_minutes:
+            logger.warning("Skipping gap repair for %s due to size=%s min (max=%s)", symbol, missing_minutes, max_minutes)
+            continue
+
+        repaired = _retry_fetch(
+            provider=provider,
+            symbol=symbol,
+            timeframe="1m",
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=max(200, missing_minutes + 5),
+            retries=cfg.ingestion.retries,
+            backoff_seconds=cfg.ingestion.gap_repair_backoff_seconds,
+        )
+        if repaired:
+            repo.upsert_candles(repaired)
+
+
+def _run_ws_trades_loop(
+    repo: CandleRepository,
+    provider: MarketDataProvider,
+    cfg: AppConfig,
+    symbols: list[str],
+    venue: str,
+    should_continue: Callable[[], bool],
+) -> None:
+    _ws_warmup_from_rest(repo, provider, cfg, symbols, venue)
+
+    aggregator = TradeToCandleAggregator()
+    rollup_targets = [item for item in cfg.ingestion.ws_rollup_timeframes if item in {"5m", "1h"}]
+    one_minute_buffers: dict[str, deque[AggCandle]] = defaultdict(lambda: deque(maxlen=240))
+    last_rollup_close_ms: dict[tuple[str, str], int] = {}
+
+    for symbol in symbols:
+        for target_tf in rollup_targets:
+            latest = repo.get_latest_candle_ts(symbol=symbol, timeframe=target_tf, venue=venue)
+            if latest is not None:
+                last_rollup_close_ms[(symbol, target_tf)] = int(latest.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    def _on_trade(trade: Trade) -> None:
+        closed = aggregator.ingest_trade(trade)
+        if not closed:
+            return
+
+        repo.upsert_candles([_agg_to_dto(item, venue) for item in closed])
+
+        for one_min in closed:
+            one_minute_buffers[one_min.symbol].append(one_min)
+
+            for target_tf in rollup_targets:
+                rolled = rollup_candles(list(one_minute_buffers[one_min.symbol]), target_tf)
+                if not rolled:
+                    continue
+
+                new_rows: list[AggCandle] = []
+                watermark = last_rollup_close_ms.get((one_min.symbol, target_tf), 0)
+                for row in rolled:
+                    if row.ts_close > watermark:
+                        new_rows.append(row)
+
+                if not new_rows:
+                    continue
+
+                repo.upsert_candles([_agg_to_dto(item, venue) for item in new_rows])
+                last_rollup_close_ms[(one_min.symbol, target_tf)] = max(item.ts_close for item in new_rows)
+
+            if cfg.ingestion.gap_repair_enabled:
+                intervals = _detect_missing_1m_intervals(repo, one_min.symbol, venue, lookback_limit=240)
+                if intervals:
+                    _repair_gaps_from_rest(repo, provider, cfg, one_min.symbol, venue, intervals)
+
+    stream = CoinbaseWsTradeStream(
+        symbols=symbols,
+        reconnect_initial_backoff_seconds=cfg.ingestion.ws_reconnect_initial_backoff_seconds,
+        reconnect_max_backoff_seconds=cfg.ingestion.ws_reconnect_max_backoff_seconds,
+    )
+    stream.run(on_trade_callback=_on_trade, should_continue=should_continue)
 
 
 def run_live_once(
@@ -86,6 +284,18 @@ def run_live_loop(
 ) -> None:
     if should_continue is None:
         should_continue = lambda: True
+
+    if cfg.ingestion.mode == "ws_trades":
+        logger.info("Running ingestion in ws_trades mode for symbols=%s", symbols)
+        _run_ws_trades_loop(
+            repo=repo,
+            provider=provider,
+            cfg=cfg,
+            symbols=symbols,
+            venue=venue,
+            should_continue=should_continue,
+        )
+        return
 
     symbol_cooldown_until: dict[str, datetime] = {}
 
