@@ -100,12 +100,12 @@ trading:
     max_hold_bars: 180
   per_asset_params:
     XRP/USDT:
-      rsi_length: 20
-      atr_length: 8
-      ema_fast: 8
-      ema_slow: 34
-      rsi_entry: 45
-      rsi_exit: 55
-      stop_atr: 1.2
-      take_profit_atr: 2.0
-      max_hold_bars: 160
+      rsi_length: 19
+      atr_length: 10
+      ema_fast: 7
+      ema_slow: 50
+      rsi_entry: 34
+      rsi_exit: 64
+      stop_atr: 2.3
+      take_profit_atr: 1.4
+      max_hold_bars: 60
