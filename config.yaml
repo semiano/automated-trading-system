@@ -20,12 +20,21 @@ cache_horizon_days:
   "1d": 3650
 
 ingestion:
+  mode: "ws_trades"
+  ws_rollup_timeframes:
+    - "5m"
+    - "1h"
+  ws_reconnect_initial_backoff_seconds: 1
+  ws_reconnect_max_backoff_seconds: 30
   warmup_bars: 800
   poll_delay_seconds: 20
   retries: 5
   backoff_seconds: 2
   allow_gap_jump_to_recent: true
   max_catchup_bars_per_cycle: 800
+  gap_repair_enabled: true
+  gap_repair_max_minutes: 240
+  gap_repair_backoff_seconds: 5
 
 indicators:
   bollinger:
