@@ -20,12 +20,12 @@ cache_horizon_days:
   "1d": 3650
 
 ingestion:
-  warmup_bars: 3000
-  poll_delay_seconds: 10
+  warmup_bars: 800
+  poll_delay_seconds: 20
   retries: 5
   backoff_seconds: 2
   allow_gap_jump_to_recent: true
-  max_catchup_bars_per_cycle: 3000
+  max_catchup_bars_per_cycle: 800
 
 indicators:
   bollinger:
