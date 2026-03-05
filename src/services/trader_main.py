@@ -72,6 +72,7 @@ def main() -> None:
                 try:
                     runtime.evaluate_symbol(symbol=symbol, venue=venue)
                 except Exception as exc:  # noqa: BLE001
+                    session.rollback()
                     emit_service_event(service="trader", event="cycle_error", symbol=symbol, error=str(exc))
             if stop_event.is_set():
                 break

@@ -27,7 +27,7 @@ class CoinbaseWsTradeStream:
         symbols: list[str],
         reconnect_initial_backoff_seconds: int = 1,
         reconnect_max_backoff_seconds: int = 30,
-        ws_url: str = "wss://ws-feed.exchange.coinbase.com",
+        ws_url: str = "wss://advanced-trade-ws.coinbase.com",
     ) -> None:
         self.symbols = list(symbols)
         self.product_ids = [to_coinbase_product_id(item) for item in symbols]
@@ -59,31 +59,59 @@ class CoinbaseWsTradeStream:
         except Exception:  # noqa: BLE001
             return None
 
-    def _parse_message(self, message: str) -> Trade | None:
+    def _parse_message(self, message: str) -> list[Trade]:
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
-            return None
+            return []
 
-        if payload.get("type") != "match":
-            return None
+        out: list[Trade] = []
 
-        product_id = payload.get("product_id")
-        symbol = self.symbol_by_product.get(product_id)
-        if symbol is None:
-            return None
+        if payload.get("type") == "match":
+            product_id = payload.get("product_id")
+            symbol = self.symbol_by_product.get(product_id)
+            if symbol is None:
+                return []
 
-        ts_ms = self._parse_ts_to_ms(str(payload.get("time", "")))
-        if ts_ms is None:
-            return None
+            ts_ms = self._parse_ts_to_ms(str(payload.get("time", "")))
+            if ts_ms is None:
+                return []
 
-        try:
-            price = float(payload["price"])
-            size = float(payload["size"])
-        except Exception:  # noqa: BLE001
-            return None
+            try:
+                price = float(payload["price"])
+                size = float(payload["size"])
+            except Exception:  # noqa: BLE001
+                return []
 
-        return Trade(ts=ts_ms, price=price, size=size, symbol=symbol)
+            out.append(Trade(ts=ts_ms, price=price, size=size, symbol=symbol))
+            return out
+
+        events = payload.get("events")
+        if not isinstance(events, list):
+            return []
+
+        for event in events:
+            trades = event.get("trades") if isinstance(event, dict) else None
+            if not isinstance(trades, list):
+                continue
+            for row in trades:
+                if not isinstance(row, dict):
+                    continue
+                product_id = row.get("product_id")
+                symbol = self.symbol_by_product.get(product_id)
+                if symbol is None:
+                    continue
+                ts_ms = self._parse_ts_to_ms(str(row.get("time", "")))
+                if ts_ms is None:
+                    continue
+                try:
+                    price = float(row["price"])
+                    size = float(row["size"])
+                except Exception:  # noqa: BLE001
+                    continue
+                out.append(Trade(ts=ts_ms, price=price, size=size, symbol=symbol))
+
+        return out
 
     def run(self, on_trade_callback: Callable[[Trade], None], should_continue: Callable[[], bool] | None = None) -> None:
         if should_continue is None:
@@ -103,18 +131,26 @@ class CoinbaseWsTradeStream:
                 opened_event = threading.Event()
 
                 def _on_open(ws):
-                    subscribe = {
-                        "type": "subscribe",
-                        "product_ids": self.product_ids,
-                        "channels": ["matches"],
-                    }
-                    ws.send(json.dumps(subscribe))
+                    subscriptions = [
+                        {
+                            "type": "subscribe",
+                            "channel": "market_trades",
+                            "product_ids": self.product_ids,
+                        },
+                        {
+                            "type": "subscribe",
+                            "product_ids": self.product_ids,
+                            "channels": ["matches"],
+                        },
+                    ]
+                    for item in subscriptions:
+                        ws.send(json.dumps(item))
                     opened_event.set()
                     logger.info("Coinbase WS connected: products=%s", self.product_ids)
 
                 def _on_message(_ws, message: str):
-                    trade = self._parse_message(message)
-                    if trade is not None:
+                    trades = self._parse_message(message)
+                    for trade in trades:
                         on_trade_callback(trade)
 
                 def _on_error(_ws, error):
