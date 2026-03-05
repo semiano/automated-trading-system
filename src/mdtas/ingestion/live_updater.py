@@ -166,6 +166,8 @@ def _run_ws_trades_loop(
     rollup_targets = [item for item in cfg.ingestion.ws_rollup_timeframes if item in {"5m", "1h"}]
     one_minute_buffers: dict[str, deque[AggCandle]] = defaultdict(lambda: deque(maxlen=240))
     last_rollup_close_ms: dict[tuple[str, str], int] = {}
+    last_one_min_close_ms: dict[str, int] = {}
+    last_one_min_close_price: dict[str, float] = {}
     symbol_last_gap_check_at: dict[str, float] = defaultdict(float)
     symbol_last_gap_repair_at: dict[str, float] = defaultdict(float)
 
@@ -174,6 +176,13 @@ def _run_ws_trades_loop(
     max_repair_intervals_per_cycle = 2
 
     for symbol in symbols:
+        latest_1m = repo.get_latest_candle_ts(symbol=symbol, timeframe="1m", venue=venue)
+        if latest_1m is not None:
+            last_one_min_close_ms[symbol] = int(latest_1m.replace(tzinfo=timezone.utc).timestamp() * 1000)
+            latest_row = repo.get_candles(symbol=symbol, timeframe="1m", venue=venue, start=None, end=None, limit=1, latest=True)
+            if not latest_row.empty:
+                last_one_min_close_price[symbol] = float(latest_row.iloc[-1]["close"])
+
         for target_tf in rollup_targets:
             latest = repo.get_latest_candle_ts(symbol=symbol, timeframe=target_tf, venue=venue)
             if latest is not None:
@@ -206,14 +215,54 @@ def _run_ws_trades_loop(
         _repair_gaps_from_rest(repo, provider, cfg, symbol, venue, selected)
         symbol_last_gap_repair_at[symbol] = time.monotonic()
 
+    def _expand_with_synthetic_gaps(candle: AggCandle) -> list[AggCandle]:
+        symbol = candle.symbol
+        out: list[AggCandle] = []
+
+        prev_close_ms = last_one_min_close_ms.get(symbol)
+        prev_close_price = last_one_min_close_price.get(symbol)
+
+        if prev_close_ms is not None and prev_close_price is not None and candle.ts_close > prev_close_ms + 60_000:
+            synthetic_count = 0
+            for gap_close_ms in range(prev_close_ms + 60_000, candle.ts_close, 60_000):
+                out.append(
+                    AggCandle(
+                        symbol=symbol,
+                        timeframe="1m",
+                        ts_close=gap_close_ms,
+                        open=prev_close_price,
+                        high=prev_close_price,
+                        low=prev_close_price,
+                        close=prev_close_price,
+                        volume=0.0,
+                    )
+                )
+                last_one_min_close_ms[symbol] = gap_close_ms
+                synthetic_count += 1
+
+            if synthetic_count > 0:
+                logger.info("Synthesized %s missing 1m candles for %s", synthetic_count, symbol)
+
+        out.append(candle)
+        last_one_min_close_ms[symbol] = candle.ts_close
+        last_one_min_close_price[symbol] = float(candle.close)
+        return out
+
     def _on_trade(trade: Trade) -> None:
         closed = aggregator.ingest_trade(trade)
         if not closed:
             return
 
-        repo.upsert_candles([_agg_to_dto(item, venue) for item in closed])
-
+        expanded: list[AggCandle] = []
         for one_min in closed:
+            expanded.extend(_expand_with_synthetic_gaps(one_min))
+
+        if not expanded:
+            return
+
+        repo.upsert_candles([_agg_to_dto(item, venue) for item in expanded])
+
+        for one_min in expanded:
             one_minute_buffers[one_min.symbol].append(one_min)
 
             for target_tf in rollup_targets:
