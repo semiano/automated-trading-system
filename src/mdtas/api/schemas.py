@@ -96,6 +96,14 @@ class RiskPolicyOut(BaseModel):
     portfolio_soft_risk_limit_usd: float
 
 
+class TraderConfigReloadStatusOut(BaseModel):
+    last_status: str | None
+    last_event_ts: datetime | None
+    last_event_note: str | None
+    last_success_ts: datetime | None
+    last_failure_ts: datetime | None
+
+
 class RiskPolicyUpdate(BaseModel):
     risk_budget_policy: str | None = None
     portfolio_soft_risk_limit_usd: float | None = Field(default=None, ge=0.0)

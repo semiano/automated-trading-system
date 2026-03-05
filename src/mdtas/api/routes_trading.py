@@ -12,6 +12,7 @@ from mdtas.api.schemas import (
     OpenPositionOut,
     RiskPolicyOut,
     RiskPolicyUpdate,
+    TraderConfigReloadStatusOut,
 )
 from mdtas.config import get_config
 from mdtas.db.session import get_session
@@ -19,6 +20,7 @@ from mdtas.db.trading_repo import TradingRepository
 from mdtas.trading.runtime import AssetParamResolver
 
 router = APIRouter(tags=["trading"])
+SYSTEM_TRADER_SYMBOL = "__SYSTEM__/TRADER"
 
 
 def get_repo(session: Session = Depends(get_session)):
@@ -290,4 +292,26 @@ def update_risk_policy_settings(payload: RiskPolicyUpdate):
     return RiskPolicyOut(
         risk_budget_policy=cfg.trading.risk_budget_policy,
         portfolio_soft_risk_limit_usd=float(cfg.trading.portfolio_soft_risk_limit_usd),
+    )
+
+
+@router.get("/control-plane/trader/reload-status", response_model=TraderConfigReloadStatusOut)
+def get_trader_reload_status(repo: TradingRepository = Depends(get_repo)):
+    last_event = repo.latest_engine_event(
+        symbol=SYSTEM_TRADER_SYMBOL,
+        states=("config_reloaded", "config_reload_failed"),
+    )
+    last_success = repo.latest_engine_event(symbol=SYSTEM_TRADER_SYMBOL, states=("config_reloaded",))
+    last_failure = repo.latest_engine_event(symbol=SYSTEM_TRADER_SYMBOL, states=("config_reload_failed",))
+
+    status = None
+    if last_event is not None:
+        status = "ok" if last_event.state == "config_reloaded" else "error"
+
+    return TraderConfigReloadStatusOut(
+        last_status=status,
+        last_event_ts=last_event.created_at if last_event is not None else None,
+        last_event_note=last_event.note if last_event is not None else None,
+        last_success_ts=last_success.created_at if last_success is not None else None,
+        last_failure_ts=last_failure.created_at if last_failure is not None else None,
     )

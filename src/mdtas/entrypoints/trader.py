@@ -13,6 +13,7 @@ from mdtas.trading.runtime import TradingRuntime
 
 
 logger = logging.getLogger(__name__)
+SYSTEM_TRADER_SYMBOL = "__SYSTEM__/TRADER"
 
 
 def _runtime_symbols(cfg, provider) -> tuple[str, list[str]]:
@@ -71,8 +72,21 @@ def main() -> None:
                         cfg.trading.runtime_timeframe,
                         cfg.trading.bb_entry_mode,
                     )
+                    trading_repo.log_engine_event(
+                        symbol=SYSTEM_TRADER_SYMBOL,
+                        state="config_reloaded",
+                        note=(
+                            f"runtime_timeframe={cfg.trading.runtime_timeframe}, "
+                            f"bb_entry_mode={cfg.trading.bb_entry_mode}, symbols={len(symbols)}"
+                        ),
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to hot-reload trader config: %s", exc)
+                    trading_repo.log_engine_event(
+                        symbol=SYSTEM_TRADER_SYMBOL,
+                        state="config_reload_failed",
+                        note=str(exc),
+                    )
 
             for symbol in symbols:
                 try:

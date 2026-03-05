@@ -19,6 +19,20 @@ class TradingRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def log_engine_event(self, symbol: str, state: str, note: str | None = None) -> AssetEngineLog:
+        row = AssetEngineLog(symbol=symbol, state=state, note=note)
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return row
+
+    def latest_engine_event(self, symbol: str, states: tuple[str, ...] | None = None) -> AssetEngineLog | None:
+        stmt = select(AssetEngineLog).where(AssetEngineLog.symbol == symbol)
+        if states:
+            stmt = stmt.where(AssetEngineLog.state.in_(states))
+        stmt = stmt.order_by(AssetEngineLog.created_at.desc(), AssetEngineLog.id.desc()).limit(1)
+        return self.session.scalar(stmt)
+
     def get_or_create_asset_control(
         self,
         symbol: str,
