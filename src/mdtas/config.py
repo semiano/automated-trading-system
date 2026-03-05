@@ -90,6 +90,7 @@ class TradingConfig(BaseModel):
     chop_bb_stdev: float = 2.0
     chop_bb_width_min: float = 0.01
     chop_atr_pct_min: float = 0.003
+    bb_entry_mode: Literal["off", "touch_revert"] = "off"
     cooldown_bars_after_exit: int = 10
     cooldown_bars_after_stop: int = 30
     max_entries_per_hour: int = 6

@@ -441,7 +441,15 @@ class TradingRuntime:
             return
 
         indicators = ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"]
-        out = compute(frame, indicators, params.indicator_params())
+        indicator_params = params.indicator_params()
+        bb_entry_mode = str(self.cfg.trading.bb_entry_mode)
+        if bb_entry_mode != "off":
+            indicators.append("bbands")
+            indicator_params["bollinger"] = {
+                "length": int(self.cfg.indicators.bollinger.length),
+                "stdev": float(self.cfg.indicators.bollinger.stdev),
+            }
+        out = compute(frame, indicators, indicator_params)
         if len(out) < 2:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
@@ -492,8 +500,8 @@ class TradingRuntime:
             long_allowed = trade_side_mode in {"long_only", "long_short"}
             short_allowed = trade_side_mode in {"short_only", "long_short"}
 
-            long_ok, long_note = self._entry_diagnostics_long(prev, params)
-            short_ok, short_note = self._entry_diagnostics_short(prev, params)
+            long_ok, long_note = self._entry_diagnostics_long(prev, params, bb_entry_mode)
+            short_ok, short_note = self._entry_diagnostics_short(prev, params, bb_entry_mode)
 
             chosen_side: str | None = None
             chosen_note = ""
@@ -892,7 +900,7 @@ class TradingRuntime:
 
         self._manage_open_position(open_position, prev, bar, params, constraints)
 
-    def _entry_diagnostics_long(self, prev: pd.Series, params: StrategyParams) -> tuple[bool, str]:
+    def _entry_diagnostics_long(self, prev: pd.Series, params: StrategyParams, bb_entry_mode: str) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
         missing: list[str] = []
         if pd.isna(prev.get("rsi")):
@@ -903,6 +911,8 @@ class TradingRuntime:
             missing.append(fast_col)
         if pd.isna(prev.get("close")):
             missing.append("close")
+        if bb_entry_mode != "off" and pd.isna(prev.get("bb_lower")):
+            missing.append("bb_lower")
         if missing:
             return False, f"missing={','.join(missing)}"
 
@@ -912,13 +922,19 @@ class TradingRuntime:
         ema_fast = float(prev[fast_col])
         pass_rsi = rsi <= params.rsi_entry
         pass_trend = close > ema_fast
+        pass_bb = True
+        bb_note = "bb=off"
+        if bb_entry_mode == "touch_revert":
+            bb_lower = float(prev["bb_lower"])
+            pass_bb = close <= bb_lower
+            bb_note = f", close={close:.6f}<=bb_lower={bb_lower:.6f}({pass_bb})"
         note = (
             f"long: rsi={rsi:.2f}<={params.rsi_entry:.2f}({pass_rsi}), "
-            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}), atr={atr:.6f}"
+            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend, note
+        return pass_rsi and pass_trend and pass_bb, note
 
-    def _entry_diagnostics_short(self, prev: pd.Series, params: StrategyParams) -> tuple[bool, str]:
+    def _entry_diagnostics_short(self, prev: pd.Series, params: StrategyParams, bb_entry_mode: str) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
         missing: list[str] = []
         if pd.isna(prev.get("rsi")):
@@ -929,6 +945,8 @@ class TradingRuntime:
             missing.append(fast_col)
         if pd.isna(prev.get("close")):
             missing.append("close")
+        if bb_entry_mode != "off" and pd.isna(prev.get("bb_upper")):
+            missing.append("bb_upper")
         if missing:
             return False, f"short: missing={','.join(missing)}"
 
@@ -938,11 +956,17 @@ class TradingRuntime:
         ema_fast = float(prev[fast_col])
         pass_rsi = rsi >= params.rsi_exit
         pass_trend = close < ema_fast
+        pass_bb = True
+        bb_note = "bb=off"
+        if bb_entry_mode == "touch_revert":
+            bb_upper = float(prev["bb_upper"])
+            pass_bb = close >= bb_upper
+            bb_note = f", close={close:.6f}>=bb_upper={bb_upper:.6f}({pass_bb})"
         note = (
             f"short: rsi={rsi:.2f}>={params.rsi_exit:.2f}({pass_rsi}), "
-            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}), atr={atr:.6f}"
+            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend, note
+        return pass_rsi and pass_trend and pass_bb, note
 
     def _manage_open_position(
         self,

@@ -173,8 +173,8 @@ class _ExecutorSpy:
 
 def test_runtime_entry_uses_adapter(monkeypatch):
     monkeypatch.setattr("mdtas.trading.runtime.compute", _mock_compute_for_entry)
-    monkeypatch.setattr(TradingRuntime, "_entry_diagnostics_long", lambda self, prev, params: (True, "forced_long"))
-    monkeypatch.setattr(TradingRuntime, "_entry_diagnostics_short", lambda self, prev, params: (False, "forced_short"))
+    monkeypatch.setattr(TradingRuntime, "_entry_diagnostics_long", lambda self, prev, params, bb_entry_mode: (True, "forced_long"))
+    monkeypatch.setattr(TradingRuntime, "_entry_diagnostics_short", lambda self, prev, params, bb_entry_mode: (False, "forced_short"))
 
     cfg = AppConfig()
     cfg.trading.position_size_usd = 100.0

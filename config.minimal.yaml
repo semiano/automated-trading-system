@@ -34,6 +34,7 @@ trading:
   chop_bb_stdev: 2.0
   chop_bb_width_min: 0.01
   chop_atr_pct_min: 0.003
+  bb_entry_mode: "off"
   cooldown_bars_after_exit: 10
   cooldown_bars_after_stop: 30
   max_entries_per_hour: 6
