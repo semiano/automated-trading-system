@@ -162,7 +162,9 @@ class AssetParamResolver:
         self.cfg = cfg
         self._tuned_symbol: str | None = None
         self._tuned_params: StrategyParams | None = None
-        self._load_tuned_file()
+        self._tuned_path: Path | None = None
+        self._tuned_mtime_ns: int | None = None
+        self._refresh_tuned_if_needed()
 
     def _from_config(self, item: StrategyParamsConfig) -> StrategyParams:
         return StrategyParams(
@@ -177,11 +179,16 @@ class AssetParamResolver:
             max_hold_bars=int(item.max_hold_bars),
         )
 
-    def _load_tuned_file(self) -> None:
+    def _resolve_tuned_path(self) -> Path:
         path = Path(self.cfg.trading.tuned_params_path)
         if not path.is_absolute():
             path = Path.cwd() / path
+        return path
+
+    def _load_tuned_file(self, path: Path) -> None:
         if not path.exists():
+            self._tuned_symbol = None
+            self._tuned_params = None
             return
 
         try:
@@ -202,10 +209,30 @@ class AssetParamResolver:
                     max_hold_bars=int(tuned.get("max_hold_bars", 240)),
                 )
                 logger.info("Loaded tuned strategy params for %s from %s", symbol, path)
+            else:
+                self._tuned_symbol = None
+                self._tuned_params = None
+                logger.warning("Tuned params file missing expected keys: %s", path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed loading tuned params file: %s", exc)
 
+    def _refresh_tuned_if_needed(self) -> None:
+        path = self._resolve_tuned_path()
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except FileNotFoundError:
+            mtime_ns = None
+
+        if self._tuned_path == path and self._tuned_mtime_ns == mtime_ns:
+            return
+
+        self._tuned_path = path
+        self._tuned_mtime_ns = mtime_ns
+        self._load_tuned_file(path)
+
     def for_symbol(self, symbol: str) -> StrategyParams:
+        self._refresh_tuned_if_needed()
+
         if symbol in self.cfg.trading.per_asset_params:
             return self._from_config(self.cfg.trading.per_asset_params[symbol])
 
@@ -222,6 +249,50 @@ class TradingRuntime:
         self.trading_repo = trading_repo
         self.params_resolver = AssetParamResolver(cfg)
         self.execution = self._build_execution_adapter()
+
+    def apply_config(self, cfg: AppConfig) -> None:
+        old_adapter = self.cfg.trading.execution_adapter
+        old_slippage = self.cfg.trading.slippage_bps
+        old_provider = self.cfg.providers.default_provider
+        old_ccxt_venue = self.cfg.providers.ccxt.venue
+        old_ccxt_rate_limit = self.cfg.providers.ccxt.rate_limit
+        old_ccxt_api_key = self.cfg.providers.ccxt.api_key
+        old_ccxt_api_secret = self.cfg.providers.ccxt.api_secret
+        old_ccxt_api_password = self.cfg.providers.ccxt.api_password
+        old_ccxt_sandbox = self.cfg.providers.ccxt.sandbox
+        old_live_enabled = self.cfg.trading.live_trading_enabled
+        old_live_allow_short = self.cfg.trading.live_allow_short
+        old_live_max_notional = self.cfg.trading.live_max_order_notional_usd
+        old_live_symbols = tuple(self.cfg.trading.live_allowed_symbols)
+        old_live_ack_required = self.cfg.trading.live_require_explicit_env_ack
+        old_live_ack_name = self.cfg.trading.live_ack_env_var_name
+        old_live_ack_value = self.cfg.trading.live_ack_env_var_value
+
+        self.cfg = cfg
+        self.params_resolver = AssetParamResolver(cfg)
+
+        execution_changed = (
+            old_adapter != cfg.trading.execution_adapter
+            or old_slippage != cfg.trading.slippage_bps
+            or old_provider != cfg.providers.default_provider
+            or old_ccxt_venue != cfg.providers.ccxt.venue
+            or old_ccxt_rate_limit != cfg.providers.ccxt.rate_limit
+            or old_ccxt_api_key != cfg.providers.ccxt.api_key
+            or old_ccxt_api_secret != cfg.providers.ccxt.api_secret
+            or old_ccxt_api_password != cfg.providers.ccxt.api_password
+            or old_ccxt_sandbox != cfg.providers.ccxt.sandbox
+            or old_live_enabled != cfg.trading.live_trading_enabled
+            or old_live_allow_short != cfg.trading.live_allow_short
+            or old_live_max_notional != cfg.trading.live_max_order_notional_usd
+            or old_live_symbols != tuple(cfg.trading.live_allowed_symbols)
+            or old_live_ack_required != cfg.trading.live_require_explicit_env_ack
+            or old_live_ack_name != cfg.trading.live_ack_env_var_name
+            or old_live_ack_value != cfg.trading.live_ack_env_var_value
+        )
+
+        if execution_changed:
+            self.execution = self._build_execution_adapter()
+            logger.info("Trading runtime execution adapter refreshed after config reload")
 
     def _build_execution_adapter(self):
         if self.cfg.trading.execution_adapter != "real":

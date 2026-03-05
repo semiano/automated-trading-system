@@ -153,6 +153,9 @@ bash scripts/run_ingestion_local.sh
 bash scripts/run_trader_local.sh
 ```
 
+Trader hot-reloads engine settings from `config.yaml` and tuned params from `trading.tuned_params_path` automatically while running.
+After saving either file, new values are applied on the next trader cycle (no process restart required).
+
 ### 6) Run web UI
 
 ```bash
@@ -217,6 +220,8 @@ EXCHANGE_API_SECRET=...
 ```
 
 3. Restart API and worker.
+
+Note: trader config and tuned-params changes are applied without restart; API still requires restart for non-database config changes.
 
 ## Docker Compose (local multi-container)
 

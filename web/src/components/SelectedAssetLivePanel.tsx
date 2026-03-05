@@ -41,6 +41,7 @@ export default function SelectedAssetLivePanel({ symbol, assetControl, openPosit
               <th style={{ textAlign: "left", padding: 8 }}>Run</th>
               <th style={{ textAlign: "left", padding: 8 }}>Mode</th>
               <th style={{ textAlign: "left", padding: 8 }}>Side</th>
+              <th style={{ textAlign: "left", padding: 8 }}>BB Entry</th>
               <th style={{ textAlign: "right", padding: 8 }}>Current Risk</th>
               <th style={{ textAlign: "left", padding: 8 }}>Last Run</th>
               <th style={{ textAlign: "left", padding: 8 }}>Next Run</th>
@@ -60,6 +61,7 @@ export default function SelectedAssetLivePanel({ symbol, assetControl, openPosit
                       : "Long"
                   : "-"}
               </td>
+              <td style={{ padding: 8 }}>{assetControl ? (assetControl.bb_entry_mode === "touch_revert" ? "TouchRevert" : "Off") : "-"}</td>
               <td style={{ textAlign: "right", padding: 8 }}>{assetControl ? num(assetControl.current_risk_usd, 4) : "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.last_run_ts)?.toLocaleString() ?? "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.next_run_ts)?.toLocaleString() ?? "-"}</td>

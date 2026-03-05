@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
-from mdtas.config import get_config
+from mdtas.config import get_config, get_config_mtime_ns, load_config, resolve_config_path
 from mdtas.db.repo import CandleRepository
 from mdtas.db.session import get_session, init_db
 from mdtas.db.trading_repo import TradingRepository
@@ -44,6 +44,8 @@ def main() -> None:
     logger.info("Trader worker started")
 
     cfg = get_config()
+    config_path = resolve_config_path()
+    config_mtime_ns = get_config_mtime_ns(config_path)
     init_db()
     session = get_session()
     try:
@@ -54,6 +56,24 @@ def main() -> None:
         venue, symbols = _runtime_symbols(cfg, provider)
 
         while True:
+            latest_mtime_ns = get_config_mtime_ns(config_path)
+            if latest_mtime_ns != config_mtime_ns:
+                try:
+                    cfg = load_config(config_path)
+                    runtime.apply_config(cfg)
+                    provider = build_provider(cfg)
+                    venue, symbols = _runtime_symbols(cfg, provider)
+                    config_mtime_ns = latest_mtime_ns
+                    logger.info(
+                        "Reloaded trader config (venue=%s, symbols=%s, runtime_timeframe=%s, bb_entry_mode=%s)",
+                        venue,
+                        symbols,
+                        cfg.trading.runtime_timeframe,
+                        cfg.trading.bb_entry_mode,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Failed to hot-reload trader config: %s", exc)
+
             for symbol in symbols:
                 try:
                     runtime.evaluate_symbol(symbol=symbol, venue=venue)

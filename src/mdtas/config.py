@@ -139,22 +139,38 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
-@lru_cache(maxsize=1)
-def get_config() -> AppConfig:
-    load_dotenv()
+def resolve_config_path() -> Path:
     config_path = Path(os.getenv("MDTAS_CONFIG_PATH", "config.yaml"))
     if not config_path.is_absolute():
         config_path = Path.cwd() / config_path
+    return config_path
+
+
+def load_config(config_path: Path | None = None) -> AppConfig:
+    load_dotenv()
+    path = config_path or resolve_config_path()
 
     default_obj = AppConfig().model_dump()
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as handle:
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
             parsed = yaml.safe_load(handle) or {}
         merged = _deep_merge(default_obj, parsed)
     else:
         merged = default_obj
-
     return AppConfig(**merged)
+
+
+def get_config_mtime_ns(config_path: Path | None = None) -> int | None:
+    path = config_path or resolve_config_path()
+    try:
+        return path.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_config() -> AppConfig:
+    return load_config()
 
 
 def get_db_url() -> str:

@@ -83,6 +83,7 @@ export type AssetControl = {
   enabled: boolean;
   execution_mode: "sim" | "live";
   trade_side: "long_only" | "long_short" | "short_only";
+  bb_entry_mode: "off" | "touch_revert";
   soft_risk_limit_usd: number;
   current_risk_usd: number;
   last_run_ts?: string | null;

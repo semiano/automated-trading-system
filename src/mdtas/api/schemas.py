@@ -106,6 +106,7 @@ class AssetControlOut(BaseModel):
     enabled: bool
     execution_mode: str
     trade_side: str
+    bb_entry_mode: str
     soft_risk_limit_usd: float
     current_risk_usd: float
     last_run_ts: datetime | None

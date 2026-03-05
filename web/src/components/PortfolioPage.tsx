@@ -256,6 +256,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                 <th style={{ textAlign: "left", padding: 8 }}>Run/Pause</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Mode</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Side</th>
+                <th style={{ textAlign: "left", padding: 8 }}>BB Entry</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Soft Risk</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Current Risk</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Last Run</th>
@@ -431,6 +432,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       </button>
                     </div>
                   </td>
+                  <td style={{ padding: 8 }}>{row.bb_entry_mode === "touch_revert" ? "TouchRevert" : "Off"}</td>
                   <td style={{ textAlign: "right", padding: 8 }}>
                     <input
                       type="number"
