@@ -1,9 +1,25 @@
-import type { AssetControl, AssetEngineLog, Candle, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
-const DEV_BASE = "http://localhost:8000/api/v1";
-const BASE = import.meta.env.DEV
-  ? DEV_BASE
-  : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEV_BASE);
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const mode = (import.meta.env.VITE_API_MODE as string | undefined)?.toLowerCase() ?? "auto";
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    if (mode === "local") {
+      return configured ?? "http://localhost:8000/api/v1";
+    }
+    if (mode === "vps") {
+      return `${window.location.protocol}//${host}:8000/api/v1`;
+    }
+    if (configured && configured.includes("localhost") && !isLocalHost) {
+      return `${window.location.protocol}//${host}:8000/api/v1`;
+    }
+  }
+  return configured ?? "/api/v1";
+}
+
+const BASE = resolveApiBase();
 export const API_BASE_URL = BASE;
 
 function qs(params: Record<string, string | number | undefined>) {
@@ -138,4 +154,14 @@ export async function updateRiskPolicySettings(args: {
   });
   if (!response.ok) throw new Error("Failed to update risk policy settings");
   return (await response.json()) as RiskPolicySettings;
+}
+
+export async function fetchCatchupStatus(args: {
+  symbol?: string;
+  timeframe?: string;
+  venue?: string;
+} = {}): Promise<CatchupStatusRow[]> {
+  const response = await fetch(`${BASE}/ingestion/catchup-status?${qs(args)}`);
+  if (!response.ok) throw new Error("Failed to fetch ingestion catchup status");
+  return (await response.json()) as CatchupStatusRow[];
 }

@@ -1,4 +1,5 @@
 from mdtas.trading.execution import (
+    CcxtExecutionAdapter,
     ExecutionAdapter,
     Fill,
     PaperExecutionAdapter,
@@ -13,6 +14,7 @@ from mdtas.trading.execution import (
 )
 
 __all__ = [
+    "CcxtExecutionAdapter",
     "ExecutionAdapter",
     "Fill",
     "PaperExecutionAdapter",

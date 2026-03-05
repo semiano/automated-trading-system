@@ -1,0 +1,38 @@
+providers:
+  default_provider: "mock"
+
+symbols:
+  - "BTC/USDT"
+
+timeframes:
+  - "5m"
+
+cache_horizon_days:
+  "5m": 30
+
+ingestion:
+  warmup_bars: 500
+  warmup_bars_per_cycle_cap: 500
+  poll_delay_seconds: 10
+  retries: 3
+  backoff_seconds: 2
+  allow_gap_jump_to_recent: true
+  max_catchup_bars_per_cycle: 300
+
+trading:
+  enabled: true
+  runtime_timeframe: "5m"
+  execution_adapter: "paper"
+  live_trading_enabled: false
+  live_allow_short: false
+  live_max_order_notional_usd: 25.0
+  live_allowed_symbols: []
+  live_require_explicit_env_ack: true
+  live_ack_env_var_name: "MDTAS_ENABLE_LIVE_TRADING"
+  live_ack_env_var_value: "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
+  position_size_usd: 50.0
+  soft_portfolio_risk_limit_usd: 50.0
+  risk_budget_policy: "per_symbol"
+  portfolio_soft_risk_limit_usd: 0.0
+  fee_bps: 6.0
+  slippage_bps: 2.0

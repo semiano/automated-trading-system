@@ -156,11 +156,11 @@ class _ExecutorSpy:
         self.entry_called = False
         self.exit_called = False
 
-    def submit_entry(self, *, raw_price, qty, trade_side, constraints: SymbolExecutionConstraints):
+    def submit_entry(self, *, symbol, raw_price, qty, trade_side, constraints: SymbolExecutionConstraints):
         self.entry_called = True
         return Fill(side="buy", price=101.0, qty=qty, notional_usd=101.0 * qty, fee_usd=0.2)
 
-    def submit_exit(self, *, raw_price, qty, trade_side, constraints: SymbolExecutionConstraints):
+    def submit_exit(self, *, symbol, raw_price, qty, trade_side, constraints: SymbolExecutionConstraints):
         self.exit_called = True
         return Fill(side="sell", price=98.5, qty=qty, notional_usd=98.5 * qty, fee_usd=0.2)
 

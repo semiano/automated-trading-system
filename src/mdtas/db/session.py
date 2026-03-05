@@ -13,6 +13,9 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name != "sqlite":
+        return
+
     with engine.begin() as conn:
         def _ensure_column(table: str, column: str, ddl: str) -> None:
             rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()

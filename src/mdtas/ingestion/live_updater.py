@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from mdtas.config import AppConfig
@@ -55,8 +56,20 @@ def run_live_once(
         inserted += repo.upsert_candles(candles)
         cursor = page_end + tf_delta
 
-    warmup_start = end - timeframe_to_timedelta(timeframe) * cfg.ingestion.warmup_bars
-    df = repo.get_candles(symbol, timeframe, venue, warmup_start, end, limit=cfg.ingestion.warmup_bars + 10)
+    warmup_bars = max(50, cfg.ingestion.warmup_bars)
+    warmup_bars_cap = max(50, cfg.ingestion.warmup_bars_per_cycle_cap)
+    effective_warmup_bars = min(warmup_bars, warmup_bars_cap)
+    if effective_warmup_bars < warmup_bars:
+        logger.info(
+            "Warmup bars capped for %s %s: requested=%s capped=%s",
+            symbol,
+            timeframe,
+            warmup_bars,
+            effective_warmup_bars,
+        )
+
+    warmup_start = end - timeframe_to_timedelta(timeframe) * effective_warmup_bars
+    df = repo.get_candles(symbol, timeframe, venue, warmup_start, end, limit=effective_warmup_bars + 10)
     compute_indicators(df, ["bbands", "rsi", "atr", "ema", "volume_sma", "vwap"], cfg.indicators.model_dump())
     return inserted
 
@@ -69,10 +82,14 @@ def run_live_loop(
     timeframes: list[str],
     venue: str,
     trading_runtime: TradingRuntime | None = None,
+    should_continue: Callable[[], bool] | None = None,
 ) -> None:
+    if should_continue is None:
+        should_continue = lambda: True
+
     symbol_cooldown_until: dict[str, datetime] = {}
 
-    while True:
+    while should_continue():
         now = datetime.utcnow().replace(microsecond=0)
         for symbol in symbols:
             if trading_runtime is not None and not trading_runtime.is_symbol_enabled(symbol):
@@ -132,4 +149,12 @@ def run_live_loop(
                     trading_runtime.evaluate_symbol(symbol=symbol, venue=venue)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Trading runtime failed for %s: %s", symbol, exc)
-        time.sleep(max(1, cfg.ingestion.poll_delay_seconds))
+        if not should_continue():
+            break
+
+        sleep_seconds = max(1, cfg.ingestion.poll_delay_seconds)
+        sleep_step = 0.2
+        slept = 0.0
+        while slept < sleep_seconds and should_continue():
+            time.sleep(min(sleep_step, sleep_seconds - slept))
+            slept += sleep_step
