@@ -117,6 +117,14 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     return remaining > 0 ? `${remaining}s` : "due";
   };
 
+  const formatAssetState = (state: string | null | undefined, note: string | null | undefined): string => {
+    if (!state) return "";
+    if (state === "insufficient_bars" && note) {
+      return `${state}: ${note}`;
+    }
+    return state;
+  };
+
   const cumulative = useMemo(() => {
     const ordered = [...closedTrades].reverse();
     let running = 0;
@@ -449,7 +457,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   <td style={{ padding: 8 }}>
                     <span style={cellPulseStyle(`${row.symbol}:last`)}>{parseApiTimestamp(row.last_run_ts)?.toLocaleString() ?? "-"}</span>
                     <span style={{ color: "#9ca3af", marginLeft: 6 }}>
-                      {row.last_evaluated_state ? `(${row.last_evaluated_state})` : ""}
+                      {row.last_evaluated_state ? `(${formatAssetState(row.last_evaluated_state, row.last_evaluated_note)})` : ""}
                     </span>
                   </td>
                   <td style={{ padding: 8 }}>

@@ -15,6 +15,14 @@ function parseApiTimestamp(value: string | null | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function formatAssetState(state: string | null | undefined, note: string | null | undefined): string {
+  if (!state) return "-";
+  if (state === "insufficient_bars" && note) {
+    return `${state}: ${note}`;
+  }
+  return state;
+}
+
 export default function SelectedAssetLivePanel({ symbol, assetControl, openPositions }: Props) {
   return (
     <section style={{ borderBottom: "1px solid #22262f" }}>
@@ -48,7 +56,7 @@ export default function SelectedAssetLivePanel({ symbol, assetControl, openPosit
               <td style={{ textAlign: "right", padding: 8 }}>{assetControl ? num(assetControl.current_risk_usd, 4) : "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.last_run_ts)?.toLocaleString() ?? "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.next_run_ts)?.toLocaleString() ?? "-"}</td>
-              <td style={{ padding: 8 }}>{assetControl?.last_evaluated_state ?? "-"}</td>
+              <td style={{ padding: 8 }}>{formatAssetState(assetControl?.last_evaluated_state, assetControl?.last_evaluated_note)}</td>
             </tr>
           </tbody>
         </table>

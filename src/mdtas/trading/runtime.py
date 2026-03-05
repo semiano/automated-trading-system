@@ -14,6 +14,7 @@ from mdtas.db.repo import CandleRepository
 from mdtas.db.trading_repo import TradingRepository
 from mdtas.indicators.engine import compute
 from mdtas.trading.execution import (
+    CcxtExecutionAdapter,
     PaperExecutionAdapter,
     SymbolExecutionConstraints,
     gap_aware_raw_exit_price,
@@ -108,7 +109,38 @@ class TradingRuntime:
         self.candle_repo = candle_repo
         self.trading_repo = trading_repo
         self.params_resolver = AssetParamResolver(cfg)
-        self.execution = PaperExecutionAdapter(slippage_bps=cfg.trading.slippage_bps)
+        self.execution = self._build_execution_adapter()
+
+    def _build_execution_adapter(self):
+        if self.cfg.trading.execution_adapter != "real":
+            return PaperExecutionAdapter(slippage_bps=self.cfg.trading.slippage_bps)
+
+        try:
+            adapter = CcxtExecutionAdapter(
+                venue=self.cfg.providers.ccxt.venue,
+                rate_limit=self.cfg.providers.ccxt.rate_limit,
+                api_key=self.cfg.providers.ccxt.api_key,
+                api_secret=self.cfg.providers.ccxt.api_secret,
+                api_password=self.cfg.providers.ccxt.api_password,
+                sandbox=self.cfg.providers.ccxt.sandbox,
+                live_trading_enabled=self.cfg.trading.live_trading_enabled,
+                live_allow_short=self.cfg.trading.live_allow_short,
+                live_max_order_notional_usd=self.cfg.trading.live_max_order_notional_usd,
+                live_allowed_symbols=self.cfg.trading.live_allowed_symbols,
+                live_require_explicit_env_ack=self.cfg.trading.live_require_explicit_env_ack,
+                live_ack_env_var_name=self.cfg.trading.live_ack_env_var_name,
+                live_ack_env_var_value=self.cfg.trading.live_ack_env_var_value,
+            )
+            logger.warning(
+                "REAL execution adapter enabled (venue=%s, sandbox=%s, max_notional=%.4f)",
+                self.cfg.providers.ccxt.venue,
+                self.cfg.providers.ccxt.sandbox,
+                self.cfg.trading.live_max_order_notional_usd,
+            )
+            return adapter
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falling back to paper execution adapter: %s", exc)
+            return PaperExecutionAdapter(slippage_bps=self.cfg.trading.slippage_bps)
 
     def is_symbol_enabled(self, symbol: str) -> bool:
         control = self.trading_repo.get_or_create_asset_control(
@@ -202,20 +234,42 @@ class TradingRuntime:
             limit=max(400, self.cfg.ingestion.warmup_bars),
             latest=True,
         )
-        if len(frame) < max(params.ema_slow + 5, params.rsi_length + 5, params.atr_length + 5):
+        bars_required_ema = params.ema_slow + 5
+        bars_required_rsi = params.rsi_length + 5
+        bars_required_atr = params.atr_length + 5
+        required_bars = max(bars_required_ema, bars_required_rsi, bars_required_atr)
+        available_bars = len(frame)
+        if available_bars < required_bars:
+            missing_bars = required_bars - available_bars
             self.trading_repo.set_asset_state(
                 symbol=symbol,
                 default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="insufficient_bars",
-                note=f"Need more bars for runtime timeframe {timeframe}",
+                note=f"Need {required_bars} bars on {timeframe}; have {available_bars} (missing {missing_bars})",
                 log_event=True,
+            )
+            logger.warning(
+                "Skipping trading eval for %s due to insufficient bars (timeframe=%s, have=%d, need=%d, missing=%d, requirements={ema:%d,rsi:%d,atr:%d})",
+                symbol,
+                timeframe,
+                available_bars,
+                required_bars,
+                missing_bars,
+                bars_required_ema,
+                bars_required_rsi,
+                bars_required_atr,
             )
             self._emit_decision_log(
                 symbol=symbol,
                 timeframe=timeframe,
                 ts=datetime.utcnow().replace(microsecond=0),
                 decision="hold",
-                reasons=["insufficient_bars"],
+                reasons=[
+                    "insufficient_bars",
+                    f"have={available_bars}",
+                    f"need={required_bars}",
+                    f"missing={missing_bars}",
+                ],
             )
             return
 
@@ -325,12 +379,31 @@ class TradingRuntime:
                 )
                 return
 
-            entry_fill = self.execution.submit_entry(
-                raw_price=raw_entry_price,
-                qty=qty,
-                trade_side=chosen_side,
-                constraints=constraints,
-            )
+            try:
+                entry_fill = self.execution.submit_entry(
+                    symbol=symbol,
+                    raw_price=raw_entry_price,
+                    qty=qty,
+                    trade_side=chosen_side,
+                    constraints=constraints,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="execution_failed",
+                    note=f"entry_failed: {exc}",
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    decision="hold",
+                    reasons=["execution_failed", "entry_failed"],
+                )
+                logger.exception("Execution adapter entry failed for %s: %s", symbol, exc)
+                return
             if constraints.min_notional_usd > 0 and entry_fill.notional_usd < constraints.min_notional_usd:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
@@ -565,12 +638,31 @@ class TradingRuntime:
             stop_price=float(position.stop_price) if position.stop_price is not None else None,
             take_profit_price=float(position.take_profit_price) if position.take_profit_price is not None else None,
         )
-        exit_fill = self.execution.submit_exit(
-            raw_price=raw_exit,
-            qty=float(position.qty),
-            trade_side=position.trade_side,
-            constraints=constraints,
-        )
+        try:
+            exit_fill = self.execution.submit_exit(
+                symbol=position.symbol,
+                raw_price=raw_exit,
+                qty=float(position.qty),
+                trade_side=position.trade_side,
+                constraints=constraints,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.trading_repo.set_asset_state(
+                symbol=position.symbol,
+                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                state="execution_failed",
+                note=f"exit_failed: {exc}",
+                log_event=True,
+            )
+            self._emit_decision_log(
+                symbol=position.symbol,
+                timeframe=position.timeframe,
+                ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                decision="hold",
+                reasons=["execution_failed", "exit_failed"],
+            )
+            logger.exception("Execution adapter exit failed for %s: %s", position.symbol, exc)
+            return
         exit_ts = pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None)
         trade = self.trading_repo.close_position(
             position=position,

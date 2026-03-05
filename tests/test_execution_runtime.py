@@ -17,10 +17,10 @@ def test_paper_adapter_entry_exit_side_semantics():
     adapter = PaperExecutionAdapter(slippage_bps=10.0)
     constraints = SymbolExecutionConstraints(fee_bps=0.0)
 
-    long_entry = adapter.submit_entry(raw_price=100.0, qty=1.0, trade_side="long", constraints=constraints)
-    long_exit = adapter.submit_exit(raw_price=100.0, qty=1.0, trade_side="long", constraints=constraints)
-    short_entry = adapter.submit_entry(raw_price=100.0, qty=1.0, trade_side="short", constraints=constraints)
-    short_exit = adapter.submit_exit(raw_price=100.0, qty=1.0, trade_side="short", constraints=constraints)
+    long_entry = adapter.submit_entry(symbol="XRP/USDT", raw_price=100.0, qty=1.0, trade_side="long", constraints=constraints)
+    long_exit = adapter.submit_exit(symbol="XRP/USDT", raw_price=100.0, qty=1.0, trade_side="long", constraints=constraints)
+    short_entry = adapter.submit_entry(symbol="XRP/USDT", raw_price=100.0, qty=1.0, trade_side="short", constraints=constraints)
+    short_exit = adapter.submit_exit(symbol="XRP/USDT", raw_price=100.0, qty=1.0, trade_side="short", constraints=constraints)
 
     assert long_entry.side == "buy"
     assert long_exit.side == "sell"

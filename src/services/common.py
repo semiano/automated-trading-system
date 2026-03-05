@@ -27,6 +27,8 @@ def safe_config_summary(cfg: AppConfig) -> dict[str, object]:
         "timeframes": cfg.timeframes,
         "runtime_timeframe": cfg.trading.runtime_timeframe,
         "trading_enabled": cfg.trading.enabled,
+        "execution_adapter": cfg.trading.execution_adapter,
+        "live_trading_enabled": cfg.trading.live_trading_enabled,
         "config_path": os.getenv("MDTAS_CONFIG_PATH", "config.yaml"),
         "database_url_configured": bool(os.getenv("DATABASE_URL")),
     }

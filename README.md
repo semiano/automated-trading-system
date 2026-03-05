@@ -5,7 +5,7 @@ Production-leaning market data service for candle ingestion, local caching, dete
 ## Scope
 
 - Implements: data fetching, cache, dedupe, gap detection/repair, TA APIs, React trading UI, simulated runtime position lifecycle.
-- Does **not** implement: real exchange order execution.
+- Supports optional guarded real execution through a CCXT market-order adapter when explicitly enabled.
 
 ## Reasonable defaults used
 
@@ -34,6 +34,38 @@ Production-leaning market data service for candle ingestion, local caching, dete
   - If open gaps through the threshold, exit fills at bar open (worse outcome).
   - Otherwise, exit fills at the threshold level.
 - Position sizing is rounded down by `qty_step`; entries below `min_notional_usd` are skipped.
+
+## Guarded real execution mode (opt-in)
+
+- Real execution is disabled by default via `trading.execution_adapter: "paper"`.
+- To enable real orders, you must set all of the following:
+  - `trading.execution_adapter: "real"`
+  - `trading.live_trading_enabled: true`
+  - env `EXCHANGE_API_KEY` and `EXCHANGE_API_SECRET`
+  - env `MDTAS_ENABLE_LIVE_TRADING=YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK`
+- Safety controls:
+  - `trading.live_max_order_notional_usd` hard caps per-order notional.
+  - `trading.live_allowed_symbols` restricts tradable symbols.
+  - `trading.live_allow_short` defaults to `false`.
+  - `providers.ccxt.sandbox` supports testnet/sandbox mode where exchange supports it.
+
+Example minimal real-mode block:
+
+```yaml
+providers:
+  default_provider: "ccxt"
+  ccxt:
+    venue: "coinbase"
+    sandbox: true
+
+trading:
+  execution_adapter: "real"
+  live_trading_enabled: true
+  live_allow_short: false
+  live_max_order_notional_usd: 10.0
+  live_allowed_symbols:
+    - "XRP/USDT"
+```
 
 ### Trading risk and constraints config
 

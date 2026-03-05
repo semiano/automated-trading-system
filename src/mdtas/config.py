@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field
 class CcxtConfig(BaseModel):
     venue: str = "binance"
     rate_limit: bool = True
+    api_key: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_KEY"))
+    api_secret: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_SECRET"))
+    api_password: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_PASSWORD"))
+    sandbox: bool = Field(default_factory=lambda: os.getenv("EXCHANGE_SANDBOX", "true").lower() == "true")
 
 
 class ProvidersConfig(BaseModel):
@@ -74,6 +78,14 @@ class ExecutionConstraintsConfig(BaseModel):
 class TradingConfig(BaseModel):
     enabled: bool = True
     runtime_timeframe: str = "1m"
+    execution_adapter: Literal["paper", "real"] = "paper"
+    live_trading_enabled: bool = False
+    live_allow_short: bool = False
+    live_max_order_notional_usd: float = 25.0
+    live_allowed_symbols: list[str] = Field(default_factory=list)
+    live_require_explicit_env_ack: bool = True
+    live_ack_env_var_name: str = "MDTAS_ENABLE_LIVE_TRADING"
+    live_ack_env_var_value: str = "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
     position_size_usd: float = 100.0
     soft_portfolio_risk_limit_usd: float = 0.0
     risk_budget_policy: Literal["per_symbol", "portfolio"] = "per_symbol"

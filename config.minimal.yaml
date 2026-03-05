@@ -22,6 +22,14 @@ ingestion:
 trading:
   enabled: true
   runtime_timeframe: "5m"
+  execution_adapter: "paper"
+  live_trading_enabled: false
+  live_allow_short: false
+  live_max_order_notional_usd: 25.0
+  live_allowed_symbols: []
+  live_require_explicit_env_ack: true
+  live_ack_env_var_name: "MDTAS_ENABLE_LIVE_TRADING"
+  live_ack_env_var_value: "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
   position_size_usd: 50.0
   soft_portfolio_risk_limit_usd: 50.0
   risk_budget_policy: "per_symbol"

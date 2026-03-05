@@ -1,6 +1,25 @@
 import type { AssetControl, AssetEngineLog, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
-const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api/v1";
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const mode = (import.meta.env.VITE_API_MODE as string | undefined)?.toLowerCase() ?? "auto";
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    if (mode === "local") {
+      return configured ?? "http://localhost:8000/api/v1";
+    }
+    if (mode === "vps") {
+      return `${window.location.protocol}//${host}:8000/api/v1`;
+    }
+    if (configured && configured.includes("localhost") && !isLocalHost) {
+      return `${window.location.protocol}//${host}:8000/api/v1`;
+    }
+  }
+  return configured ?? "/api/v1";
+}
+
+const BASE = resolveApiBase();
 export const API_BASE_URL = BASE;
 
 function qs(params: Record<string, string | number | undefined>) {
