@@ -13,6 +13,9 @@ from mdtas.trading.runtime import TradingRuntime
 from services.common import emit_service_event, install_shutdown_handlers, runtime_symbols, safe_config_summary
 
 
+SYSTEM_TRADER_SYMBOL = "__SYSTEM__/TRADER"
+
+
 def main() -> None:
     setup_logging()
     cfg = get_config()
@@ -49,8 +52,21 @@ def main() -> None:
                         runtime_timeframe=cfg.trading.runtime_timeframe,
                         bb_entry_mode=cfg.trading.bb_entry_mode,
                     )
+                    trading_repo.log_engine_event(
+                        symbol=SYSTEM_TRADER_SYMBOL,
+                        state="config_reloaded",
+                        note=(
+                            f"runtime_timeframe={cfg.trading.runtime_timeframe}, "
+                            f"bb_entry_mode={cfg.trading.bb_entry_mode}, symbols={len(symbols)}"
+                        ),
+                    )
                 except Exception as exc:  # noqa: BLE001
                     emit_service_event(service="trader", event="config_reload_failed", error=str(exc))
+                    trading_repo.log_engine_event(
+                        symbol=SYSTEM_TRADER_SYMBOL,
+                        state="config_reload_failed",
+                        note=str(exc),
+                    )
 
             for symbol in symbols:
                 try:
