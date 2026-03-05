@@ -45,6 +45,23 @@ indicators:
 trading:
   enabled: true
   runtime_timeframe: "1m"
+  sizing_mode: "fixed_notional"
+  risk_per_trade_usd: 5.0
+  max_position_notional_usd: null
+  use_regime_filter: true
+  htf_timeframe: "1h"
+  regime_trend_ema_fast: 50
+  regime_trend_ema_slow: 200
+  chop_filter_mode: "bb_width"
+  chop_bb_length: 20
+  chop_bb_stdev: 2.0
+  chop_bb_width_min: 0.01
+  chop_atr_pct_min: 0.003
+  cooldown_bars_after_exit: 10
+  cooldown_bars_after_stop: 30
+  max_entries_per_hour: 6
+  max_entries_per_day: 40
+  timezone: "UTC"
   execution_adapter: "paper"
   live_trading_enabled: false
   live_allow_short: false

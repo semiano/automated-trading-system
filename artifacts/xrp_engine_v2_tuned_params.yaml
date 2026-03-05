@@ -1,0 +1,56 @@
+generated_at_utc: '2026-03-05T04:07:22.383712+00:00'
+symbol: XRP/USDT
+venue: coinbase
+timeframe: 1m
+htf_timeframe: 1h
+lookback_days: 30
+optimizer:
+  seed: 42
+  iterations: 260
+  mode: engine_v2_regime_guards
+cost_model:
+  fee_bps: 6.0
+  slippage_bps: 2.0
+xrp_engine_v2_params:
+  rsi_length: 19
+  atr_length: 10
+  ema_fast: 7
+  ema_slow: 50
+  rsi_entry: 34.0
+  rsi_exit: 64.0
+  stop_atr: 2.3
+  take_profit_atr: 1.4
+  max_hold_bars: 60
+  chop_bb_width_min: 0.008
+  cooldown_bars_after_exit: 5
+  cooldown_bars_after_stop: 30
+  max_entries_per_hour: 10
+  max_entries_per_day: 40
+  use_regime_filter: false
+  sizing_mode: risk_per_trade
+  risk_per_trade_usd: 5.0
+  max_position_notional_usd: 25.0
+  htf_timeframe: 1h
+  chop_filter_mode: bb_width
+performance:
+  train:
+    score: -12.572839119620566
+    total_return: -0.007220764513773625
+    max_drawdown: -0.019006166537264946
+    sharpe: -5.295196338003654
+    trades: 4
+    win_rate: 0.5
+  test:
+    score: 79.24767352218404
+    total_return: 0.0066601277983726614
+    max_drawdown: 0.0
+    sharpe: 39.335830371173394
+    trades: 3
+    win_rate: 1.0
+  full:
+    score: -2.0011427309839234
+    total_return: -0.0006087279298645498
+    max_drawdown: -0.019006166537264946
+    sharpe: -0.2949499728807859
+    trades: 7
+    win_rate: 0.7142857142857143

@@ -58,6 +58,12 @@ class _Repo:
     def current_open_risk_usd(self, **kwargs):
         return 0.0
 
+    def count_entries(self, **kwargs):
+        return 0
+
+    def get_last_exit(self, **kwargs):
+        return None
+
     def open_position(self, **kwargs):
         self.open_calls.append(kwargs)
 
@@ -172,6 +178,7 @@ def test_runtime_entry_uses_adapter(monkeypatch):
 
     cfg = AppConfig()
     cfg.trading.position_size_usd = 100.0
+    cfg.trading.use_regime_filter = False
     repo = _Repo()
     runtime = TradingRuntime(cfg=cfg, candle_repo=_CandleRepo(), trading_repo=repo)
     spy = _ExecutorSpy()
@@ -189,6 +196,7 @@ def test_runtime_exit_uses_adapter_and_gap_open(monkeypatch):
     monkeypatch.setattr("mdtas.trading.runtime.compute", _mock_compute_for_exit)
 
     cfg = AppConfig()
+    cfg.trading.use_regime_filter = False
     repo = _Repo()
     repo._open_position = _Position(stop_price=99.0, take_profit_price=110.0, trade_side="long")
     runtime = TradingRuntime(cfg=cfg, candle_repo=_CandleRepo(), trading_repo=repo)

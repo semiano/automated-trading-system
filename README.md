@@ -73,6 +73,24 @@ trading:
 trading:
   risk_budget_policy: "per_symbol" # or "portfolio"
   portfolio_soft_risk_limit_usd: 0.0 # 0 disables portfolio soft cap
+  sizing_mode: "fixed_notional" # or "risk_per_trade"
+  position_size_usd: 100.0 # used when sizing_mode=fixed_notional
+  risk_per_trade_usd: 5.0 # used when sizing_mode=risk_per_trade
+  max_position_notional_usd: null # optional hard cap for either sizing mode
+  use_regime_filter: true
+  htf_timeframe: "1h"
+  regime_trend_ema_fast: 50
+  regime_trend_ema_slow: 200
+  chop_filter_mode: "bb_width" # none | bb_width | atr_pct
+  chop_bb_length: 20
+  chop_bb_stdev: 2.0
+  chop_bb_width_min: 0.01
+  chop_atr_pct_min: 0.003
+  cooldown_bars_after_exit: 10
+  cooldown_bars_after_stop: 30
+  max_entries_per_hour: 6
+  max_entries_per_day: 40
+  timezone: "UTC"
   slippage_bps: 2.0
   default_constraints:
     min_notional_usd: 0.0
@@ -90,6 +108,15 @@ trading:
 - `risk_budget_policy=per_symbol`: uses each asset control `soft_risk_limit_usd`.
 - `risk_budget_policy=portfolio`: uses global `portfolio_soft_risk_limit_usd` across all open positions.
 - Soft risk limits with value `0` are treated as disabled.
+- `sizing_mode=fixed_notional`: sizes quantity from `position_size_usd / entry_price`.
+- `sizing_mode=risk_per_trade`: sizes quantity from `risk_per_trade_usd / (stop_atr * atr)` and rounds by `qty_step`.
+- `max_position_notional_usd` (if set) caps entry notional for both sizing modes.
+- `use_regime_filter=true`: gates LTF entries with HTF trend/chop state; exits remain unmanaged by this gate.
+- `htf_timeframe` defaults to `1h`; runtime uses only HTF bars with `ts <=` LTF decision bar (no lookahead).
+- Cooldown and entry-frequency guardrails gate entries only:
+  - `cooldown_bars_after_exit` for normal exits
+  - `cooldown_bars_after_stop` for stop exits
+  - `max_entries_per_hour` and `max_entries_per_day` rolling limits
 
 ## Quickstart (mock mode)
 

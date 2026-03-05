@@ -1,648 +1,648 @@
 {
-  "generated_at_utc": "2026-03-03T00:40:42.305257+00:00",
+  "generated_at_utc": "2026-03-05T03:21:33.854273+00:00",
   "symbol": "XRP/USDT",
   "venue": "coinbase",
   "timeframe": "1m",
-  "rows_used": 5849,
-  "train_rows": 4094,
-  "test_rows": 1755,
+  "rows_used": 5628,
+  "train_rows": 3939,
+  "test_rows": 1689,
   "best": {
-    "robust_score": 12.715078653117914,
+    "robust_score": 32.82091608208789,
     "params": {
       "rsi_length": 19,
-      "atr_length": 21,
-      "ema_fast": 10,
-      "ema_slow": 142,
-      "rsi_entry": 37.0,
-      "rsi_exit": 70.0,
-      "stop_atr": 2.4,
-      "take_profit_atr": 2.7,
-      "max_hold_bars": 140
+      "atr_length": 15,
+      "ema_fast": 7,
+      "ema_slow": 33,
+      "rsi_entry": 32.0,
+      "rsi_exit": 67.0,
+      "stop_atr": 2.3,
+      "take_profit_atr": 1.4,
+      "max_hold_bars": 100
     },
     "train": {
-      "score": 26.134514944781287,
-      "total_return": 0.024308973762733554,
-      "max_drawdown": -0.007868718072118419,
-      "sharpe": 12.132870326417518,
-      "trades": 3,
-      "win_rate": 0.6666666666666666
+      "score": 36.61953776360602,
+      "total_return": 0.010604904718375163,
+      "max_drawdown": -0.0016956890367183508,
+      "sharpe": 17.8603943169858,
+      "trades": 2,
+      "win_rate": 1.0
     },
     "test": {
-      "score": -21.730541126637874,
-      "total_return": -0.007513628353250534,
-      "max_drawdown": -0.011376706766638156,
-      "sharpe": -10.103287942657266,
-      "trades": 3,
-      "win_rate": 0.3333333333333333
+      "score": 68.62347581641137,
+      "total_return": 0.005230479173765179,
+      "max_drawdown": 0.0,
+      "sharpe": 34.08021394951743,
+      "trades": 2,
+      "win_rate": 1.0
     },
     "full": {
-      "score": -4.3782650694973935,
-      "total_return": -0.002692817003788095,
-      "max_drawdown": -0.0377821714540042,
-      "sharpe": -0.7860265409391659,
-      "trades": 9,
-      "win_rate": 0.3333333333333333
+      "score": 42.88054908004981,
+      "total_return": 0.01589085262540957,
+      "max_drawdown": -0.0016956890367183508,
+      "sharpe": 20.756602579855976,
+      "trades": 4,
+      "win_rate": 1.0
     }
   },
   "top_20": [
     {
-      "robust_score": 12.715078653117914,
+      "robust_score": 32.82091608208789,
       "params": {
         "rsi_length": 19,
-        "atr_length": 21,
-        "ema_fast": 10,
-        "ema_slow": 142,
-        "rsi_entry": 37.0,
-        "rsi_exit": 70.0,
-        "stop_atr": 2.4,
-        "take_profit_atr": 2.7,
-        "max_hold_bars": 140
-      },
-      "train": {
-        "score": 26.134514944781287,
-        "total_return": 0.024308973762733554,
-        "max_drawdown": -0.007868718072118419,
-        "sharpe": 12.132870326417518,
-        "trades": 3,
-        "win_rate": 0.6666666666666666
-      },
-      "test": {
-        "score": -21.730541126637874,
-        "total_return": -0.007513628353250534,
-        "max_drawdown": -0.011376706766638156,
-        "sharpe": -10.103287942657266,
-        "trades": 3,
-        "win_rate": 0.3333333333333333
-      }
-    },
-    {
-      "robust_score": 12.562983449973666,
-      "params": {
-        "rsi_length": 20,
-        "atr_length": 8,
-        "ema_fast": 10,
-        "ema_slow": 50,
-        "rsi_entry": 37.0,
-        "rsi_exit": 67.0,
-        "stop_atr": 1.4,
-        "take_profit_atr": 3.2,
-        "max_hold_bars": 470
-      },
-      "train": {
-        "score": 42.90924168403874,
-        "total_return": 0.04432052347601645,
-        "max_drawdown": -0.004597941509345671,
-        "sharpe": 19.436532913498915,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -48.55625803233766,
-        "total_return": -0.01997077033982564,
-        "max_drawdown": -0.024548437704673187,
-        "sharpe": -22.453137368037353,
-        "trades": 6,
-        "win_rate": 0.16666666666666666
-      }
-    },
-    {
-      "robust_score": 11.948449906215945,
-      "params": {
-        "rsi_length": 23,
         "atr_length": 15,
-        "ema_fast": 10,
-        "ema_slow": 99,
-        "rsi_entry": 37.0,
-        "rsi_exit": 68.0,
-        "stop_atr": 1.3,
-        "take_profit_atr": 3.0,
-        "max_hold_bars": 50
+        "ema_fast": 7,
+        "ema_slow": 33,
+        "rsi_entry": 32.0,
+        "rsi_exit": 67.0,
+        "stop_atr": 2.3,
+        "take_profit_atr": 1.4,
+        "max_hold_bars": 100
       },
       "train": {
-        "score": 36.025791931099214,
-        "total_return": 0.03466777557868084,
-        "max_drawdown": -0.004742784565051172,
-        "sharpe": 16.4667907235671,
-        "trades": 3,
-        "win_rate": 0.6666666666666666
+        "score": 36.61953776360602,
+        "total_return": 0.010604904718375163,
+        "max_drawdown": -0.0016956890367183508,
+        "sharpe": 17.8603943169858,
+        "trades": 2,
+        "win_rate": 1.0
       },
       "test": {
-        "score": -39.909470997138705,
-        "total_return": -0.017417188477195977,
-        "max_drawdown": -0.02216536388474377,
-        "sharpe": -18.29891515816724,
-        "trades": 8,
-        "win_rate": 0.25
+        "score": 68.62347581641137,
+        "total_return": 0.005230479173765179,
+        "max_drawdown": 0.0,
+        "sharpe": 34.08021394951743,
+        "trades": 2,
+        "win_rate": 1.0
       }
     },
     {
-      "robust_score": 10.098846350395812,
-      "params": {
-        "rsi_length": 20,
-        "atr_length": 10,
-        "ema_fast": 10,
-        "ema_slow": 49,
-        "rsi_entry": 37.0,
-        "rsi_exit": 66.0,
-        "stop_atr": 1.7,
-        "take_profit_atr": 3.2,
-        "max_hold_bars": 460
-      },
-      "train": {
-        "score": 41.0471914663664,
-        "total_return": 0.04222515455000342,
-        "max_drawdown": -0.005458447719460913,
-        "sharpe": 18.636091437266856,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -52.138556484025756,
-        "total_return": -0.021593108094019153,
-        "max_drawdown": -0.026133305788549444,
-        "sharpe": -24.115623663655438,
-        "trades": 6,
-        "win_rate": 0.16666666666666666
-      }
-    },
-    {
-      "robust_score": 9.928795014553708,
-      "params": {
-        "rsi_length": 17,
-        "atr_length": 9,
-        "ema_fast": 10,
-        "ema_slow": 52,
-        "rsi_entry": 37.0,
-        "rsi_exit": 64.0,
-        "stop_atr": 1.7,
-        "take_profit_atr": 3.0,
-        "max_hold_bars": 470
-      },
-      "train": {
-        "score": 41.37515495677591,
-        "total_return": 0.043280622704672034,
-        "max_drawdown": -0.005374713683904742,
-        "sharpe": 18.744787753671496,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -53.233492497192294,
-        "total_return": -0.022020853355833925,
-        "max_drawdown": -0.026198688352781496,
-        "sharpe": -24.639742930221008,
-        "trades": 6,
-        "win_rate": 0.16666666666666666
-      }
-    },
-    {
-      "robust_score": 5.349713849843193,
+      "robust_score": 31.162167498358947,
       "params": {
         "rsi_length": 19,
-        "atr_length": 22,
-        "ema_fast": 13,
-        "ema_slow": 145,
-        "rsi_entry": 40.0,
-        "rsi_exit": 69.0,
-        "stop_atr": 2.4,
-        "take_profit_atr": 2.6,
-        "max_hold_bars": 140
-      },
-      "train": {
-        "score": 26.70227977290998,
-        "total_return": 0.03006765634434294,
-        "max_drawdown": -0.013012910634018104,
-        "sharpe": 12.343144388258386,
-        "trades": 7,
-        "win_rate": 0.7142857142857143
-      },
-      "test": {
-        "score": -47.29206442286526,
-        "total_return": -0.013980479606772844,
-        "max_drawdown": -0.022335050978042448,
-        "sharpe": -22.111956701752717,
-        "trades": 11,
-        "win_rate": 0.45454545454545453
-      }
-    },
-    {
-      "robust_score": 5.293432899710856,
-      "params": {
-        "rsi_length": 22,
-        "atr_length": 16,
-        "ema_fast": 10,
-        "ema_slow": 98,
-        "rsi_entry": 37.0,
-        "rsi_exit": 69.0,
-        "stop_atr": 1.6,
-        "take_profit_atr": 2.8,
-        "max_hold_bars": 40
-      },
-      "train": {
-        "score": 32.409780252447185,
-        "total_return": 0.030418587553791454,
-        "max_drawdown": -0.005556970418760798,
-        "sharpe": 14.895669861096843,
-        "trades": 3,
-        "win_rate": 0.6666666666666666
-      },
-      "test": {
-        "score": -49.14713055128927,
-        "total_return": -0.020275296127949094,
-        "max_drawdown": -0.02415931321621778,
-        "sharpe": -22.73002107276065,
-        "trades": 7,
-        "win_rate": 0.14285714285714285
-      }
-    },
-    {
-      "robust_score": 5.1956753282163355,
-      "params": {
-        "rsi_length": 22,
-        "atr_length": 19,
-        "ema_fast": 12,
-        "ema_slow": 142,
-        "rsi_entry": 38.0,
-        "rsi_exit": 69.0,
-        "stop_atr": 2.0,
-        "take_profit_atr": 2.3,
-        "max_hold_bars": 110
-      },
-      "train": {
-        "score": -5.982514536751728,
-        "total_return": -0.003523779455446241,
-        "max_drawdown": -0.010591314295884224,
-        "sharpe": -2.4523288667270253,
-        "trades": 3,
-        "win_rate": 0.3333333333333333
-      },
-      "test": {
-        "score": 16.43136126791893,
-        "total_return": 0.0033659712332683167,
-        "max_drawdown": -0.005801088898009565,
-        "sharpe": 8.296414739236335,
-        "trades": 5,
-        "win_rate": 0.8
-      }
-    },
-    {
-      "robust_score": 4.055599963582204,
-      "params": {
-        "rsi_length": 19,
-        "atr_length": 20,
-        "ema_fast": 13,
-        "ema_slow": 72,
-        "rsi_entry": 39.0,
-        "rsi_exit": 66.0,
-        "stop_atr": 0.8,
-        "take_profit_atr": 2.9,
-        "max_hold_bars": 70
-      },
-      "train": {
-        "score": 24.335494396450944,
-        "total_return": 0.02622684643235962,
-        "max_drawdown": -0.009327299918169274,
-        "sharpe": 11.196223874152569,
-        "trades": 4,
-        "win_rate": 0.5
-      },
-      "test": {
-        "score": -45.851959085214844,
-        "total_return": -0.011518531141598398,
-        "max_drawdown": -0.018178303005265684,
-        "sharpe": -21.69970389536953,
-        "trades": 7,
-        "win_rate": 0.42857142857142855
-      }
-    },
-    {
-      "robust_score": 3.0543673211644062,
-      "params": {
-        "rsi_length": 21,
-        "atr_length": 21,
-        "ema_fast": 10,
-        "ema_slow": 50,
-        "rsi_entry": 37.0,
+        "atr_length": 12,
+        "ema_fast": 7,
+        "ema_slow": 70,
+        "rsi_entry": 32.0,
         "rsi_exit": 54.0,
         "stop_atr": 1.6,
-        "take_profit_atr": 1.9,
-        "max_hold_bars": 240
-      },
-      "train": {
-        "score": 26.633266758602108,
-        "total_return": 0.019681790104369545,
-        "max_drawdown": -0.005712158906630571,
-        "sharpe": 12.563908641281493,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -46.449303062648475,
-        "total_return": -0.017529706550710178,
-        "max_drawdown": -0.019818640857455327,
-        "sharpe": -21.67860697806507,
-        "trades": 5,
-        "win_rate": 0.2
-      }
-    },
-    {
-      "robust_score": 2.985064475471967,
-      "params": {
-        "rsi_length": 19,
-        "atr_length": 19,
-        "ema_fast": 12,
-        "ema_slow": 70,
-        "rsi_entry": 39.0,
-        "rsi_exit": 63.0,
-        "stop_atr": 0.8,
-        "take_profit_atr": 2.9,
-        "max_hold_bars": 70
-      },
-      "train": {
-        "score": 22.776527257925203,
-        "total_return": 0.025102131911744374,
-        "max_drawdown": -0.010752497834753738,
-        "sharpe": 10.530731968417994,
-        "trades": 5,
-        "win_rate": 0.4
-      },
-      "test": {
-        "score": -45.19908069194119,
-        "total_return": -0.01389337942066271,
-        "max_drawdown": -0.023197231668826812,
-        "sharpe": -21.058954424872656,
-        "trades": 10,
-        "win_rate": 0.4
-      }
-    },
-    {
-      "robust_score": 2.9632832933686792,
-      "params": {
-        "rsi_length": 23,
-        "atr_length": 9,
-        "ema_fast": 8,
-        "ema_slow": 73,
-        "rsi_entry": 36.0,
-        "rsi_exit": 59.0,
-        "stop_atr": 0.8,
-        "take_profit_atr": 1.8,
-        "max_hold_bars": 130
-      },
-      "train": {
-        "score": 27.29278193854896,
-        "total_return": 0.010559849496131868,
-        "max_drawdown": -0.0050967181384463656,
-        "sharpe": 13.316300038621277,
-        "trades": 3,
-        "win_rate": 0.6666666666666666
-      },
-      "test": {
-        "score": -49.362928476251845,
-        "total_return": -0.022947264691757674,
-        "max_drawdown": -0.0275552936274025,
-        "sharpe": -22.587442194715965,
-        "trades": 8,
-        "win_rate": 0.25
-      }
-    },
-    {
-      "robust_score": 2.0997566990138354,
-      "params": {
-        "rsi_length": 19,
-        "atr_length": 23,
-        "ema_fast": 13,
-        "ema_slow": 72,
-        "rsi_entry": 39.0,
-        "rsi_exit": 64.0,
-        "stop_atr": 1.1,
-        "take_profit_atr": 2.9,
-        "max_hold_bars": 70
-      },
-      "train": {
-        "score": 26.65199912816141,
-        "total_return": 0.028318248286135717,
-        "max_drawdown": -0.009363077966904942,
-        "sharpe": 12.25097948878107,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -55.742162914301055,
-        "total_return": -0.014206652876268655,
-        "max_drawdown": -0.020909811996308147,
-        "sharpe": -26.42845445344785,
-        "trades": 7,
-        "win_rate": 0.42857142857142855
-      }
-    },
-    {
-      "robust_score": 1.5387804375386076,
-      "params": {
-        "rsi_length": 22,
-        "atr_length": 21,
-        "ema_fast": 12,
-        "ema_slow": 198,
-        "rsi_entry": 38.0,
-        "rsi_exit": 64.0,
-        "stop_atr": 1.0,
-        "take_profit_atr": 1.1,
-        "max_hold_bars": 130
-      },
-      "train": {
-        "score": -6.353265313123153,
-        "total_return": -0.004004469396217014,
-        "max_drawdown": -0.014188443941287932,
-        "sharpe": -2.505755868512088,
-        "trades": 3,
-        "win_rate": 0.3333333333333333
-      },
-      "test": {
-        "score": 6.6716273078152115,
-        "total_return": 0.0012526420441485442,
-        "max_drawdown": -0.005801088898009565,
-        "sharpe": 3.5372142186404654,
-        "trades": 6,
-        "win_rate": 0.8333333333333334
-      }
-    },
-    {
-      "robust_score": 1.2926689410058856,
-      "params": {
-        "rsi_length": 23,
-        "atr_length": 20,
-        "ema_fast": 13,
-        "ema_slow": 72,
-        "rsi_entry": 39.0,
-        "rsi_exit": 63.0,
-        "stop_atr": 0.8,
-        "take_profit_atr": 3.2,
+        "take_profit_atr": 1.3,
         "max_hold_bars": 40
       },
       "train": {
-        "score": 27.663645294714343,
-        "total_return": 0.03001827522733236,
-        "max_drawdown": -0.008432374352719818,
-        "sharpe": 12.643880116572149,
-        "trades": 4,
-        "win_rate": 0.5
+        "score": 35.21211476026025,
+        "total_return": 0.010068076479947674,
+        "max_drawdown": -0.0016956890367181288,
+        "sharpe": 17.183524227234283,
+        "trades": 2,
+        "win_rate": 1.0
       },
       "test": {
-        "score": -58.07161181977736,
-        "total_return": -0.019649362498136314,
-        "max_drawdown": -0.026825478658236923,
-        "sharpe": -27.083573425234757,
-        "trades": 11,
-        "win_rate": 0.36363636363636365
+        "score": 66.49797972625653,
+        "total_return": 0.0047783642837433415,
+        "max_drawdown": 0.0,
+        "sharpe": 33.0400716489411,
+        "trades": 2,
+        "win_rate": 1.0
       }
     },
     {
-      "robust_score": 0.5698910092181317,
+      "robust_score": 9.026364829504509,
       "params": {
-        "rsi_length": 20,
-        "atr_length": 14,
+        "rsi_length": 16,
+        "atr_length": 12,
         "ema_fast": 11,
-        "ema_slow": 70,
-        "rsi_entry": 40.0,
-        "rsi_exit": 55.0,
-        "stop_atr": 1.5,
-        "take_profit_atr": 3.1,
-        "max_hold_bars": 130
-      },
-      "train": {
-        "score": 43.16330422879362,
-        "total_return": 0.05351835550443251,
-        "max_drawdown": -0.009050571124773477,
-        "sharpe": 19.402251472918387,
-        "trades": 15,
-        "win_rate": 0.7333333333333333
-      },
-      "test": {
-        "score": -86.05095910533184,
-        "total_return": -0.04396004202127879,
-        "max_drawdown": -0.050071462925991406,
-        "sharpe": -39.04033356382224,
-        "trades": 19,
-        "win_rate": 0.2631578947368421
-      }
-    },
-    {
-      "robust_score": -0.07193839957623993,
-      "params": {
-        "rsi_length": 21,
-        "atr_length": 21,
-        "ema_fast": 12,
-        "ema_slow": 72,
-        "rsi_entry": 40.0,
-        "rsi_exit": 67.0,
-        "stop_atr": 0.9,
-        "take_profit_atr": 3.2,
-        "max_hold_bars": 70
-      },
-      "train": {
-        "score": 28.107824705451076,
-        "total_return": 0.03390400285978945,
-        "max_drawdown": -0.015346847806315678,
-        "sharpe": 12.954117643925535,
-        "trades": 9,
-        "win_rate": 0.5555555555555556
-      },
-      "test": {
-        "score": -63.83435559462698,
-        "total_return": -0.02506797437538477,
-        "max_drawdown": -0.03429416717757039,
-        "sharpe": -29.40995406321714,
-        "trades": 15,
-        "win_rate": 0.4
-      }
-    },
-    {
-      "robust_score": -0.47308863309861593,
-      "params": {
-        "rsi_length": 22,
-        "atr_length": 21,
-        "ema_fast": 13,
-        "ema_slow": 144,
-        "rsi_entry": 39.0,
-        "rsi_exit": 70.0,
-        "stop_atr": 2.1,
-        "take_profit_atr": 2.5,
-        "max_hold_bars": 120
-      },
-      "train": {
-        "score": 19.49531347807261,
-        "total_return": 0.020760259439823292,
-        "max_drawdown": -0.010531614874726758,
-        "sharpe": 9.085592213286944,
-        "trades": 4,
-        "win_rate": 0.75
-      },
-      "test": {
-        "score": -48.985835410988045,
-        "total_return": -0.014342408768654225,
-        "max_drawdown": -0.022186003388282027,
-        "sharpe": -22.96021716541285,
-        "trades": 10,
-        "win_rate": 0.4
-      }
-    },
-    {
-      "robust_score": -1.2417184010001798,
-      "params": {
-        "rsi_length": 21,
-        "atr_length": 14,
-        "ema_fast": 7,
-        "ema_slow": 99,
-        "rsi_entry": 37.0,
-        "rsi_exit": 68.0,
-        "stop_atr": 1.5,
-        "take_profit_atr": 3.1,
+        "ema_slow": 201,
+        "rsi_entry": 42.0,
+        "rsi_exit": 62.0,
+        "stop_atr": 1.0,
+        "take_profit_atr": 3.5,
         "max_hold_bars": 40
       },
       "train": {
-        "score": 21.223468366780555,
-        "total_return": 0.029422836727258872,
-        "max_drawdown": -0.028586316382970267,
-        "sharpe": 10.22318183851644,
-        "trades": 15,
-        "win_rate": 0.4
+        "score": 22.506593763464146,
+        "total_return": 0.031076835252915602,
+        "max_drawdown": -0.026250673737387542,
+        "sharpe": 10.906975331207919,
+        "trades": 28,
+        "win_rate": 0.4642857142857143
       },
       "test": {
-        "score": -49.556186134571,
-        "total_return": -0.029324415807910675,
-        "max_drawdown": -0.03976241306572337,
-        "sharpe": -21.923999884918263,
+        "score": -22.6017526412557,
+        "total_return": -0.010127077115485328,
+        "max_drawdown": -0.027868160015963372,
+        "sharpe": -9.763477664374681,
         "trades": 13,
         "win_rate": 0.23076923076923078
       }
     },
     {
-      "robust_score": -1.7628294172234624,
+      "robust_score": 4.808029949508729,
       "params": {
-        "rsi_length": 19,
-        "atr_length": 20,
-        "ema_fast": 10,
-        "ema_slow": 48,
-        "rsi_entry": 37.0,
-        "rsi_exit": 54.0,
-        "stop_atr": 1.6,
-        "take_profit_atr": 1.8,
-        "max_hold_bars": 220
+        "rsi_length": 17,
+        "atr_length": 12,
+        "ema_fast": 7,
+        "ema_slow": 72,
+        "rsi_entry": 35.0,
+        "rsi_exit": 55.0,
+        "stop_atr": 1.4,
+        "take_profit_atr": 1.3,
+        "max_hold_bars": 40
       },
       "train": {
-        "score": 25.71454032555464,
-        "total_return": 0.01840961167258026,
-        "max_drawdown": -0.0056876522769127025,
-        "sharpe": 12.16741914745569,
-        "trades": 4,
-        "win_rate": 0.75
+        "score": -38.41574293907102,
+        "total_return": -0.02235462227353535,
+        "max_drawdown": -0.02954289126672649,
+        "sharpe": -17.08385361785695,
+        "trades": 8,
+        "win_rate": 0.25
       },
       "test": {
-        "score": -57.554135130001846,
-        "total_return": -0.023480704939258024,
-        "max_drawdown": -0.02554777362812255,
-        "sharpe": -26.746599109194346,
+        "score": 77.93789388544256,
+        "total_return": 0.005840267369062735,
+        "max_drawdown": 0.0,
+        "sharpe": 38.72193357426815,
+        "trades": 3,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": 2.6689179004582186,
+      "params": {
+        "rsi_length": 20,
+        "atr_length": 20,
+        "ema_fast": 12,
+        "ema_slow": 73,
+        "rsi_entry": 40.0,
+        "rsi_exit": 65.0,
+        "stop_atr": 1.2,
+        "take_profit_atr": 3.0,
+        "max_hold_bars": 50
+      },
+      "train": {
+        "score": 6.83903059207546,
+        "total_return": 0.008779544548890517,
+        "max_drawdown": -0.021837127725130023,
+        "sharpe": 3.8456519003471046,
+        "trades": 14,
+        "win_rate": 0.42857142857142855
+      },
+      "test": {
+        "score": -17.32047505744319,
+        "total_return": -0.004830944347080646,
+        "max_drawdown": -0.011933775968072768,
+        "sharpe": -7.95567703232538,
+        "trades": 7,
+        "win_rate": 0.5714285714285714
+      }
+    },
+    {
+      "robust_score": 2.543673483509707,
+      "params": {
+        "rsi_length": 16,
+        "atr_length": 13,
+        "ema_fast": 7,
+        "ema_slow": 32,
+        "rsi_entry": 32.0,
+        "rsi_exit": 69.0,
+        "stop_atr": 2.2,
+        "take_profit_atr": 1.3,
+        "max_hold_bars": 110
+      },
+      "train": {
+        "score": 34.89526133216741,
+        "total_return": 0.009922722009843454,
+        "max_drawdown": -0.0016956890367181288,
+        "sharpe": 17.032365236693078,
+        "trades": 2,
+        "win_rate": 1.0
+      },
+      "test": {
+        "score": 56.74786747885968,
+        "total_return": 0.0036623914988069828,
+        "max_drawdown": 0.0,
+        "sharpe": 28.205814164489492,
+        "trades": 1,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": 2.0602088722253264,
+      "params": {
+        "rsi_length": 20,
+        "atr_length": 15,
+        "ema_fast": 10,
+        "ema_slow": 201,
+        "rsi_entry": 38.0,
+        "rsi_exit": 60.0,
+        "stop_atr": 0.7,
+        "take_profit_atr": 3.3,
+        "max_hold_bars": 70
+      },
+      "train": {
+        "score": 2.9510841308113798,
+        "total_return": 0.005159411951577431,
+        "max_drawdown": -0.029577191817509618,
+        "sharpe": 2.299887222352107,
+        "trades": 13,
+        "win_rate": 0.3076923076923077
+      },
+      "test": {
+        "score": -8.38548254207185,
+        "total_return": -0.002322270012331984,
+        "max_drawdown": -0.009113609119519195,
+        "sharpe": -3.7432194968337504,
+        "trades": 4,
+        "win_rate": 0.5
+      }
+    },
+    {
+      "robust_score": 1.1845162814549441,
+      "params": {
+        "rsi_length": 19,
+        "atr_length": 8,
+        "ema_fast": 7,
+        "ema_slow": 72,
+        "rsi_entry": 34.0,
+        "rsi_exit": 58.0,
+        "stop_atr": 0.9,
+        "take_profit_atr": 1.8,
+        "max_hold_bars": 120
+      },
+      "train": {
+        "score": -1.257488766442719,
+        "total_return": -0.0003211379474573617,
+        "max_drawdown": -0.011534362691656752,
+        "sharpe": -0.2066566050987888,
+        "trades": 4,
+        "win_rate": 0.5
+      },
+      "test": {
+        "score": -8.566045772449396,
+        "total_return": -0.0016549915429141526,
+        "max_drawdown": -0.009288416148783174,
+        "sharpe": -3.8916208246154946,
+        "trades": 2,
+        "win_rate": 0.5
+      }
+    },
+    {
+      "robust_score": 0.37360263727621135,
+      "params": {
+        "rsi_length": 17,
+        "atr_length": 15,
+        "ema_fast": 6,
+        "ema_slow": 48,
+        "rsi_entry": 33.0,
+        "rsi_exit": 62.0,
+        "stop_atr": 0.9,
+        "take_profit_atr": 3.3,
+        "max_hold_bars": 740
+      },
+      "train": {
+        "score": -13.368622157895075,
+        "total_return": -0.010387648827527185,
+        "max_drawdown": -0.02663494350413831,
+        "sharpe": -5.275880332447029,
         "trades": 6,
-        "win_rate": 0.16666666666666666
+        "win_rate": 0.3333333333333333
+      },
+      "test": {
+        "score": 16.371067733070507,
+        "total_return": 0.004163017684647219,
+        "max_drawdown": -0.009288416148783174,
+        "sharpe": 8.286035466766387,
+        "trades": 2,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": -0.5635614267844051,
+      "params": {
+        "rsi_length": 20,
+        "atr_length": 14,
+        "ema_fast": 10,
+        "ema_slow": 101,
+        "rsi_entry": 37.0,
+        "rsi_exit": 70.0,
+        "stop_atr": 1.4,
+        "take_profit_atr": 3.1,
+        "max_hold_bars": 70
+      },
+      "train": {
+        "score": 7.1217082952116915,
+        "total_return": 0.00827580813001827,
+        "max_drawdown": -0.023054176772388968,
+        "sharpe": 3.9136890442766012,
+        "trades": 5,
+        "win_rate": 0.2
+      },
+      "test": {
+        "score": -20.550490910491444,
+        "total_return": -0.004976344388299525,
+        "max_drawdown": -0.009288416148783063,
+        "sharpe": -9.702775751367254,
+        "trades": 3,
+        "win_rate": 0.3333333333333333
+      }
+    },
+    {
+      "robust_score": -1.1996488395160583,
+      "params": {
+        "rsi_length": 17,
+        "atr_length": 15,
+        "ema_fast": 7,
+        "ema_slow": 70,
+        "rsi_entry": 32.0,
+        "rsi_exit": 54.0,
+        "stop_atr": 1.7,
+        "take_profit_atr": 1.1,
+        "max_hold_bars": 80
+      },
+      "train": {
+        "score": 31.03578723231223,
+        "total_return": 0.007726681489596432,
+        "max_drawdown": -0.0005541656222477487,
+        "sharpe": 15.178184510343726,
+        "trades": 2,
+        "win_rate": 1.0
+      },
+      "test": {
+        "score": 53.22025559851711,
+        "total_return": 0.0027998076035335995,
+        "max_drawdown": 0.0,
+        "sharpe": 26.485137419081877,
+        "trades": 1,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": -1.5032716599762956,
+      "params": {
+        "rsi_length": 18,
+        "atr_length": 16,
+        "ema_fast": 6,
+        "ema_slow": 51,
+        "rsi_entry": 33.0,
+        "rsi_exit": 61.0,
+        "stop_atr": 1.0,
+        "take_profit_atr": 3.4,
+        "max_hold_bars": 710
+      },
+      "train": {
+        "score": -17.70977314240993,
+        "total_return": -0.014255564944634425,
+        "max_drawdown": -0.02715767313682116,
+        "sharpe": -7.2523781298686085,
+        "trades": 5,
+        "win_rate": 0.4
+      },
+      "test": {
+        "score": 17.165945378829026,
+        "total_return": 0.004378748658441456,
+        "max_drawdown": -0.009288416148783174,
+        "sharpe": 8.672687740955935,
+        "trades": 2,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": -1.8695996272662496,
+      "params": {
+        "rsi_length": 16,
+        "atr_length": 16,
+        "ema_fast": 7,
+        "ema_slow": 71,
+        "rsi_entry": 35.0,
+        "rsi_exit": 55.0,
+        "stop_atr": 1.6,
+        "take_profit_atr": 1.2,
+        "max_hold_bars": 50
+      },
+      "train": {
+        "score": -46.37275398834252,
+        "total_return": -0.027909638564689865,
+        "max_drawdown": -0.031649171994006964,
+        "sharpe": -20.706419906116555,
+        "trades": 9,
+        "win_rate": 0.2222222222222222
+      },
+      "test": {
+        "score": 74.42990926552619,
+        "total_return": 0.0049412607234426975,
+        "max_drawdown": -0.00015555734882044536,
+        "sharpe": 37.017558317055574,
+        "trades": 3,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": -2.477926336783808,
+      "params": {
+        "rsi_length": 23,
+        "atr_length": 20,
+        "ema_fast": 10,
+        "ema_slow": 74,
+        "rsi_entry": 37.0,
+        "rsi_exit": 63.0,
+        "stop_atr": 1.2,
+        "take_profit_atr": 2.9,
+        "max_hold_bars": 50
+      },
+      "train": {
+        "score": 3.407005822645054,
+        "total_return": 0.004375843441954075,
+        "max_drawdown": -0.02211164834782331,
+        "sharpe": 2.2230601896595226,
+        "trades": 5,
+        "win_rate": 0.2
+      },
+      "test": {
+        "score": -19.121371775723127,
+        "total_return": -0.005613214738402705,
+        "max_drawdown": -0.010812861538114893,
+        "sharpe": -8.895639304797982,
+        "trades": 4,
+        "win_rate": 0.5
+      }
+    },
+    {
+      "robust_score": -3.6460030579413782,
+      "params": {
+        "rsi_length": 22,
+        "atr_length": 16,
+        "ema_fast": 10,
+        "ema_slow": 71,
+        "rsi_entry": 37.0,
+        "rsi_exit": 57.0,
+        "stop_atr": 1.4,
+        "take_profit_atr": 3.1,
+        "max_hold_bars": 120
+      },
+      "train": {
+        "score": 6.028577552065016,
+        "total_return": 0.007123898798011563,
+        "max_drawdown": -0.023119936773108196,
+        "sharpe": 3.426691939325176,
+        "trades": 5,
+        "win_rate": 0.2
+      },
+      "test": {
+        "score": -27.327367047953253,
+        "total_return": -0.007889439965402145,
+        "max_drawdown": -0.012318380542964746,
+        "sharpe": -12.839660109417576,
+        "trades": 4,
+        "win_rate": 0.25
+      }
+    },
+    {
+      "robust_score": -3.889823489342036,
+      "params": {
+        "rsi_length": 17,
+        "atr_length": 12,
+        "ema_fast": 10,
+        "ema_slow": 199,
+        "rsi_entry": 39.0,
+        "rsi_exit": 60.0,
+        "stop_atr": 0.7,
+        "take_profit_atr": 3.7,
+        "max_hold_bars": 70
+      },
+      "train": {
+        "score": 3.0842377413183337,
+        "total_return": 0.006681156349378492,
+        "max_drawdown": -0.04004485042076411,
+        "sharpe": 2.6494065658131656,
+        "trades": 16,
+        "win_rate": 0.3125
+      },
+      "test": {
+        "score": -25.770222917711294,
+        "total_return": -0.008278726598388242,
+        "max_drawdown": -0.011358311955550593,
+        "sharpe": -12.040425770269717,
+        "trades": 6,
+        "win_rate": 0.3333333333333333
+      }
+    },
+    {
+      "robust_score": -4.263500968564354,
+      "params": {
+        "rsi_length": 19,
+        "atr_length": 21,
+        "ema_fast": 12,
+        "ema_slow": 48,
+        "rsi_entry": 39.0,
+        "rsi_exit": 57.0,
+        "stop_atr": 1.6,
+        "take_profit_atr": 1.8,
+        "max_hold_bars": 260
+      },
+      "train": {
+        "score": -1.9956834460272792,
+        "total_return": -0.0007491825180606648,
+        "max_drawdown": -0.019416444119947696,
+        "sharpe": -0.27288927351217557,
+        "trades": 7,
+        "win_rate": 0.42857142857142855
+      },
+      "test": {
+        "score": -20.720060041031164,
+        "total_return": -0.00466592716556069,
+        "max_drawdown": -0.010874659022877542,
+        "sharpe": -9.710493891551222,
+        "trades": 6,
+        "win_rate": 0.5
+      }
+    },
+    {
+      "robust_score": -4.864655253581702,
+      "params": {
+        "rsi_length": 17,
+        "atr_length": 14,
+        "ema_fast": 8,
+        "ema_slow": 71,
+        "rsi_entry": 33.0,
+        "rsi_exit": 56.0,
+        "stop_atr": 1.6,
+        "take_profit_atr": 1.1,
+        "max_hold_bars": 80
+      },
+      "train": {
+        "score": 26.106159849711528,
+        "total_return": 0.005840303715197281,
+        "max_drawdown": 0.0,
+        "sharpe": 12.7760647390959,
+        "trades": 1,
+        "win_rate": 1.0
+      },
+      "test": {
+        "score": 51.90383098315943,
+        "total_return": 0.003561457328692841,
+        "max_drawdown": -0.00036244495410220345,
+        "sharpe": 25.814715973768138,
+        "trades": 2,
+        "win_rate": 1.0
+      }
+    },
+    {
+      "robust_score": -5.073525325431902,
+      "params": {
+        "rsi_length": 21,
+        "atr_length": 20,
+        "ema_fast": 13,
+        "ema_slow": 202,
+        "rsi_entry": 42.0,
+        "rsi_exit": 67.0,
+        "stop_atr": 0.7,
+        "take_profit_atr": 1.1,
+        "max_hold_bars": 130
+      },
+      "train": {
+        "score": 10.742605590162912,
+        "total_return": 0.010318144533647322,
+        "max_drawdown": -0.013397562387156614,
+        "sharpe": 5.647322440013788,
+        "trades": 26,
+        "win_rate": 0.6538461538461539
+      },
+      "test": {
+        "score": -47.433352869978116,
+        "total_return": -0.011738753702052351,
+        "max_drawdown": -0.01581814782493851,
+        "sharpe": -22.490194315138286,
+        "trades": 11,
+        "win_rate": 0.45454545454545453
+      }
+    },
+    {
+      "robust_score": -5.384269234155399,
+      "params": {
+        "rsi_length": 22,
+        "atr_length": 23,
+        "ema_fast": 13,
+        "ema_slow": 71,
+        "rsi_entry": 40.0,
+        "rsi_exit": 66.0,
+        "stop_atr": 0.8,
+        "take_profit_atr": 2.9,
+        "max_hold_bars": 80
+      },
+      "train": {
+        "score": 7.381832240691359,
+        "total_return": 0.009318810166043079,
+        "max_drawdown": -0.023630717609127383,
+        "sharpe": 4.1288971403173464,
+        "trades": 13,
+        "win_rate": 0.38461538461538464
+      },
+      "test": {
+        "score": -40.08175439073894,
+        "total_return": -0.010062056253933194,
+        "max_drawdown": -0.011924645135508727,
+        "sharpe": -19.075035028607548,
+        "trades": 7,
+        "win_rate": 0.42857142857142855
       }
     }
   ]

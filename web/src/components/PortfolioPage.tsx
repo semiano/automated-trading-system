@@ -119,7 +119,14 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
 
   const formatAssetState = (state: string | null | undefined, note: string | null | undefined): string => {
     if (!state) return "";
-    if (state === "insufficient_bars" && note) {
+    if ((
+      state === "insufficient_bars"
+      || state === "regime_blocked"
+      || state === "chop_blocked"
+      || state === "cooldown_active"
+      || state === "max_entries_per_hour"
+      || state === "max_entries_per_day"
+    ) && note) {
       return `${state}: ${note}`;
     }
     return state;

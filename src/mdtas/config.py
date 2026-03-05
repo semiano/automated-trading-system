@@ -78,6 +78,23 @@ class ExecutionConstraintsConfig(BaseModel):
 class TradingConfig(BaseModel):
     enabled: bool = True
     runtime_timeframe: str = "1m"
+    sizing_mode: Literal["fixed_notional", "risk_per_trade"] = "fixed_notional"
+    risk_per_trade_usd: float = 5.0
+    max_position_notional_usd: float | None = None
+    use_regime_filter: bool = True
+    htf_timeframe: str = "1h"
+    regime_trend_ema_fast: int = 50
+    regime_trend_ema_slow: int = 200
+    chop_filter_mode: Literal["none", "bb_width", "atr_pct"] = "bb_width"
+    chop_bb_length: int = 20
+    chop_bb_stdev: float = 2.0
+    chop_bb_width_min: float = 0.01
+    chop_atr_pct_min: float = 0.003
+    cooldown_bars_after_exit: int = 10
+    cooldown_bars_after_stop: int = 30
+    max_entries_per_hour: int = 6
+    max_entries_per_day: int = 40
+    timezone: str = "UTC"
     execution_adapter: Literal["paper", "real"] = "paper"
     live_trading_enabled: bool = False
     live_allow_short: bool = False
