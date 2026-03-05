@@ -131,18 +131,23 @@ class CoinbaseWsTradeStream:
                 opened_event = threading.Event()
 
                 def _on_open(ws):
-                    subscriptions = [
-                        {
-                            "type": "subscribe",
-                            "channel": "market_trades",
-                            "product_ids": self.product_ids,
-                        },
-                        {
-                            "type": "subscribe",
-                            "product_ids": self.product_ids,
-                            "channels": ["matches"],
-                        },
-                    ]
+                    subscriptions = []
+                    if "advanced-trade-ws.coinbase.com" in self.ws_url:
+                        subscriptions.append(
+                            {
+                                "type": "subscribe",
+                                "channel": "market_trades",
+                                "product_ids": self.product_ids,
+                            }
+                        )
+                    else:
+                        subscriptions.append(
+                            {
+                                "type": "subscribe",
+                                "product_ids": self.product_ids,
+                                "channels": ["matches"],
+                            }
+                        )
                     for item in subscriptions:
                         ws.send(json.dumps(item))
                     opened_event.set()
