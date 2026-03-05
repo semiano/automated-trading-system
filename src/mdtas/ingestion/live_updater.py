@@ -166,12 +166,45 @@ def _run_ws_trades_loop(
     rollup_targets = [item for item in cfg.ingestion.ws_rollup_timeframes if item in {"5m", "1h"}]
     one_minute_buffers: dict[str, deque[AggCandle]] = defaultdict(lambda: deque(maxlen=240))
     last_rollup_close_ms: dict[tuple[str, str], int] = {}
+    symbol_last_gap_check_at: dict[str, float] = defaultdict(float)
+    symbol_last_gap_repair_at: dict[str, float] = defaultdict(float)
+
+    gap_check_interval_seconds = max(15, cfg.ingestion.poll_delay_seconds * 3)
+    gap_repair_cooldown_seconds = max(30, cfg.ingestion.poll_delay_seconds * 6)
+    max_repair_intervals_per_cycle = 2
 
     for symbol in symbols:
         for target_tf in rollup_targets:
             latest = repo.get_latest_candle_ts(symbol=symbol, timeframe=target_tf, venue=venue)
             if latest is not None:
                 last_rollup_close_ms[(symbol, target_tf)] = int(latest.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    def _maybe_repair_symbol_gaps(symbol: str) -> None:
+        if not cfg.ingestion.gap_repair_enabled:
+            return
+
+        now_mono = time.monotonic()
+        last_check = symbol_last_gap_check_at[symbol]
+        if (now_mono - last_check) < gap_check_interval_seconds:
+            return
+
+        symbol_last_gap_check_at[symbol] = now_mono
+        intervals = _detect_missing_1m_intervals(repo, symbol, venue, lookback_limit=240)
+        if not intervals:
+            return
+
+        last_repair = symbol_last_gap_repair_at[symbol]
+        if (now_mono - last_repair) < gap_repair_cooldown_seconds:
+            logger.info(
+                "Deferring gap repair for %s: cooldown active (%.1fs remaining)",
+                symbol,
+                gap_repair_cooldown_seconds - (now_mono - last_repair),
+            )
+            return
+
+        selected = intervals[-max_repair_intervals_per_cycle:]
+        _repair_gaps_from_rest(repo, provider, cfg, symbol, venue, selected)
+        symbol_last_gap_repair_at[symbol] = time.monotonic()
 
     def _on_trade(trade: Trade) -> None:
         closed = aggregator.ingest_trade(trade)
@@ -200,10 +233,7 @@ def _run_ws_trades_loop(
                 repo.upsert_candles([_agg_to_dto(item, venue) for item in new_rows])
                 last_rollup_close_ms[(one_min.symbol, target_tf)] = max(item.ts_close for item in new_rows)
 
-            if cfg.ingestion.gap_repair_enabled:
-                intervals = _detect_missing_1m_intervals(repo, one_min.symbol, venue, lookback_limit=240)
-                if intervals:
-                    _repair_gaps_from_rest(repo, provider, cfg, one_min.symbol, venue, intervals)
+            _maybe_repair_symbol_gaps(one_min.symbol)
 
     stream = CoinbaseWsTradeStream(
         symbols=symbols,

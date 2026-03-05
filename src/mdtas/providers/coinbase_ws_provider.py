@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
+import random
 import signal
 import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from websocket import WebSocketApp
+import websockets
+from websockets.exceptions import ConnectionClosed
 
 from mdtas.ingestion.trade_aggregator import Trade
 
@@ -27,7 +31,10 @@ class CoinbaseWsTradeStream:
         symbols: list[str],
         reconnect_initial_backoff_seconds: int = 1,
         reconnect_max_backoff_seconds: int = 30,
-        ws_url: str = "wss://advanced-trade-ws.coinbase.com",
+        ws_url: str = "wss://ws-feed.exchange.coinbase.com",
+        queue_maxsize: int = 5000,
+        ping_interval_seconds: int = 20,
+        ping_timeout_seconds: int = 20,
     ) -> None:
         self.symbols = list(symbols)
         self.product_ids = [to_coinbase_product_id(item) for item in symbols]
@@ -35,18 +42,27 @@ class CoinbaseWsTradeStream:
         self.reconnect_initial_backoff_seconds = max(1, int(reconnect_initial_backoff_seconds))
         self.reconnect_max_backoff_seconds = max(self.reconnect_initial_backoff_seconds, int(reconnect_max_backoff_seconds))
         self.ws_url = ws_url
+        self.queue_maxsize = max(100, int(queue_maxsize))
+        self.ping_interval_seconds = max(5, int(ping_interval_seconds))
+        self.ping_timeout_seconds = max(5, int(ping_timeout_seconds))
 
         self._stop_event = threading.Event()
-        self._app: WebSocketApp | None = None
-        self._last_error: str | None = None
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._app is not None:
-            try:
-                self._app.close()
-            except Exception:  # noqa: BLE001
-                pass
+
+    def _build_subscribe_payload(self) -> dict:
+        if "advanced-trade-ws.coinbase.com" in self.ws_url:
+            return {
+                "type": "subscribe",
+                "channel": "market_trades",
+                "product_ids": self.product_ids,
+            }
+        return {
+            "type": "subscribe",
+            "product_ids": self.product_ids,
+            "channels": ["matches"],
+        }
 
     @staticmethod
     def _parse_ts_to_ms(raw: str) -> int | None:
@@ -113,6 +129,75 @@ class CoinbaseWsTradeStream:
 
         return out
 
+    async def _consumer_loop(self, queue: asyncio.Queue[str], on_trade_callback: Callable[[Trade], None]) -> None:
+        while not self._stop_event.is_set() or not queue.empty():
+            try:
+                message = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+
+            try:
+                trades = self._parse_message(message)
+                for trade in trades:
+                    on_trade_callback(trade)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Coinbase WS consumer error: %s", exc)
+            finally:
+                queue.task_done()
+
+    async def _reader_loop(
+        self,
+        queue: asyncio.Queue[str],
+        should_continue: Callable[[], bool],
+    ) -> None:
+        backoff_seconds = float(self.reconnect_initial_backoff_seconds)
+
+        while should_continue() and not self._stop_event.is_set():
+            try:
+                async with websockets.connect(
+                    self.ws_url,
+                    ping_interval=self.ping_interval_seconds,
+                    ping_timeout=self.ping_timeout_seconds,
+                    max_queue=1024,
+                    close_timeout=5,
+                ) as ws:
+                    await ws.send(json.dumps(self._build_subscribe_payload()))
+                    logger.info("Coinbase WS connected: products=%s", self.product_ids)
+                    backoff_seconds = float(self.reconnect_initial_backoff_seconds)
+
+                    async for message in ws:
+                        if self._stop_event.is_set() or not should_continue():
+                            break
+                        try:
+                            queue.put_nowait(message)
+                        except asyncio.QueueFull:
+                            logger.warning("Coinbase WS queue full; dropping message")
+
+            except ConnectionClosed as exc:
+                logger.warning("Coinbase WS closed: code=%s msg=%s", exc.code, exc.reason)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Coinbase WS error: %s", exc)
+
+            if self._stop_event.is_set() or not should_continue():
+                break
+
+            sleep_s = min(float(self.reconnect_max_backoff_seconds), backoff_seconds) + random.uniform(0.0, 0.75)
+            logger.info("Coinbase WS reconnect in %.2fs", sleep_s)
+            await asyncio.sleep(sleep_s)
+            backoff_seconds = min(float(self.reconnect_max_backoff_seconds), backoff_seconds * 2.0)
+
+    async def _run_async(self, on_trade_callback: Callable[[Trade], None], should_continue: Callable[[], bool]) -> None:
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=self.queue_maxsize)
+        consumer_task = asyncio.create_task(self._consumer_loop(queue, on_trade_callback))
+        reader_task = asyncio.create_task(self._reader_loop(queue, should_continue))
+
+        await reader_task
+        self._stop_event.set()
+        await queue.join()
+        consumer_task.cancel()
+        with contextlib.suppress(Exception):
+            await consumer_task
+
     def run(self, on_trade_callback: Callable[[Trade], None], should_continue: Callable[[], bool] | None = None) -> None:
         if should_continue is None:
             should_continue = lambda: True
@@ -125,64 +210,8 @@ class CoinbaseWsTradeStream:
         signal.signal(signal.SIGTERM, _handle_signal)
         signal.signal(signal.SIGINT, _handle_signal)
 
-        backoff_seconds = self.reconnect_initial_backoff_seconds
         try:
-            while should_continue() and not self._stop_event.is_set():
-                opened_event = threading.Event()
-
-                def _on_open(ws):
-                    subscriptions = []
-                    if "advanced-trade-ws.coinbase.com" in self.ws_url:
-                        subscriptions.append(
-                            {
-                                "type": "subscribe",
-                                "channel": "market_trades",
-                                "product_ids": self.product_ids,
-                            }
-                        )
-                    else:
-                        subscriptions.append(
-                            {
-                                "type": "subscribe",
-                                "product_ids": self.product_ids,
-                                "channels": ["matches"],
-                            }
-                        )
-                    for item in subscriptions:
-                        ws.send(json.dumps(item))
-                    opened_event.set()
-                    logger.info("Coinbase WS connected: products=%s", self.product_ids)
-
-                def _on_message(_ws, message: str):
-                    trades = self._parse_message(message)
-                    for trade in trades:
-                        on_trade_callback(trade)
-
-                def _on_error(_ws, error):
-                    self._last_error = str(error)
-                    logger.warning("Coinbase WS error: %s", self._last_error)
-
-                def _on_close(_ws, status_code, status_message):
-                    logger.warning("Coinbase WS closed: code=%s msg=%s", status_code, status_message)
-
-                self._app = WebSocketApp(
-                    self.ws_url,
-                    on_open=_on_open,
-                    on_message=_on_message,
-                    on_error=_on_error,
-                    on_close=_on_close,
-                )
-                self._app.run_forever(ping_interval=0)
-
-                if self._stop_event.is_set() or not should_continue():
-                    break
-
-                if opened_event.is_set():
-                    backoff_seconds = self.reconnect_initial_backoff_seconds
-
-                logger.info("Coinbase WS reconnect in %ss", backoff_seconds)
-                time.sleep(backoff_seconds)
-                backoff_seconds = min(backoff_seconds * 2, self.reconnect_max_backoff_seconds)
+            asyncio.run(self._run_async(on_trade_callback, should_continue))
         finally:
             signal.signal(signal.SIGTERM, previous_sigterm)
             signal.signal(signal.SIGINT, previous_sigint)

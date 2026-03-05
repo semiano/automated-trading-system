@@ -19,6 +19,7 @@ dependencies = [
   "python-dotenv>=1.0.0",
   "pyyaml>=6.0.0",
   "websocket-client>=1.8.0",
+  "websockets>=12.0",
   "ccxt>=4.3.0,<4.5.41",
   "apscheduler>=3.10.4",
 ]

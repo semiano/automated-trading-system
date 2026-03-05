@@ -64,3 +64,21 @@ def test_parse_advanced_market_trades_message():
     assert trade.price == 1.2345
     assert trade.size == 12.5
     assert trade.ts > 0
+
+
+def test_subscribe_payload_for_advanced_endpoint():
+    stream = CoinbaseWsTradeStream(symbols=["XRP/USDT"], ws_url="wss://advanced-trade-ws.coinbase.com")
+    assert stream._build_subscribe_payload() == {
+        "type": "subscribe",
+        "channel": "market_trades",
+        "product_ids": ["XRP-USDT"],
+    }
+
+
+def test_subscribe_payload_for_exchange_endpoint():
+    stream = CoinbaseWsTradeStream(symbols=["XRP/USDT"], ws_url="wss://ws-feed.exchange.coinbase.com")
+    assert stream._build_subscribe_payload() == {
+        "type": "subscribe",
+        "product_ids": ["XRP-USDT"],
+        "channels": ["matches"],
+    }
