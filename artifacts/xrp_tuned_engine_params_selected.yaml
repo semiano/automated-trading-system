@@ -1,28 +1,28 @@
-generated_at_utc: '2026-03-05T03:21:33.854273+00:00'
+generated_at_utc: '2026-03-05T04:30:00+00:00'
 symbol: XRP/USDT
 venue: coinbase
 timeframe: 1m
-selection_basis: latest_retroactive_backtest_tuning_run
-source_summary: artifacts/xrp_backtest_tuning_report.json
+selection_basis: manual_override_requested_by_user
+source_summary: manual_override
 cost_model:
   fee_bps: 6.0
   slippage_bps: 2.0
 xrp_strategy_params:
-  rsi_length: 19
-  atr_length: 15
-  ema_fast: 7
-  ema_slow: 33
-  rsi_entry: 32.0
-  rsi_exit: 67.0
-  stop_atr: 2.3
-  take_profit_atr: 1.4
-  max_hold_bars: 100
+  rsi_length: 20
+  atr_length: 8
+  ema_fast: 8
+  ema_slow: 34
+  rsi_entry: 45.0
+  rsi_exit: 55.0
+  stop_atr: 1.2
+  take_profit_atr: 2.0
+  max_hold_bars: 160
 best_observed_metrics:
-  robust_score: 32.82091608208789
+  robust_score: null
   full:
-    score: 42.88054908004981
-    total_return: 0.01589085262540957
-    max_drawdown: -0.0016956890367183508
-    sharpe: 20.756602579855976
-    trades: 4
-    win_rate: 1.0
+    score: null
+    total_return: null
+    max_drawdown: null
+    sharpe: null
+    trades: null
+    win_rate: null
