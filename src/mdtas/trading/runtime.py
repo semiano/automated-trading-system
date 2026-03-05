@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,9 +21,120 @@ from mdtas.trading.execution import (
     gap_aware_raw_exit_price,
     round_down_to_step,
 )
+from mdtas.trading.regime import compute_htf_regime
 from mdtas.utils.timeframes import timeframe_to_timedelta
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class EntrySizingResult:
+    qty_raw: float
+    qty_final: float
+    stop_distance: float | None
+    sizing_reason: str | None
+
+
+@dataclass(slots=True)
+class EntryGuardResult:
+    blocked_reason: str | None
+    details: str
+
+
+def evaluate_entry_guards(
+    *,
+    decision_ts: datetime,
+    timeframe: str,
+    last_exit_ts: datetime | None,
+    last_exit_reason: str | None,
+    cooldown_bars_after_exit: int,
+    cooldown_bars_after_stop: int,
+    entries_last_hour: int,
+    entries_last_day: int,
+    max_entries_per_hour: int,
+    max_entries_per_day: int,
+) -> EntryGuardResult:
+    if last_exit_ts is not None:
+        tf_delta = timeframe_to_timedelta(timeframe)
+        elapsed = decision_ts - last_exit_ts
+        bars_since_exit = int(elapsed // tf_delta) if elapsed.total_seconds() >= 0 else 0
+        required_bars = int(cooldown_bars_after_stop) if (last_exit_reason == "stop") else int(cooldown_bars_after_exit)
+        if bars_since_exit < required_bars:
+            return EntryGuardResult(
+                blocked_reason="cooldown_active",
+                details=(
+                    f"bars_since_exit={bars_since_exit}, required={required_bars}, "
+                    f"last_exit_reason={last_exit_reason}, timeframe={timeframe}"
+                ),
+            )
+
+    if max_entries_per_hour > 0 and entries_last_hour >= max_entries_per_hour:
+        return EntryGuardResult(
+            blocked_reason="max_entries_per_hour",
+            details=f"entries_last_hour={entries_last_hour}, cap={max_entries_per_hour}",
+        )
+
+    if max_entries_per_day > 0 and entries_last_day >= max_entries_per_day:
+        return EntryGuardResult(
+            blocked_reason="max_entries_per_day",
+            details=f"entries_last_day={entries_last_day}, cap={max_entries_per_day}",
+        )
+
+    return EntryGuardResult(blocked_reason=None, details="ok")
+
+
+def compute_entry_sizing(
+    *,
+    sizing_mode: str,
+    position_size_usd: float,
+    risk_per_trade_usd: float,
+    max_position_notional_usd: float | None,
+    raw_entry_price: float,
+    atr: float | None,
+    stop_atr: float,
+    qty_step: float,
+) -> EntrySizingResult:
+    if raw_entry_price <= 0 or not math.isfinite(raw_entry_price):
+        return EntrySizingResult(qty_raw=0.0, qty_final=0.0, stop_distance=None, sizing_reason="invalid_entry_price")
+
+    if sizing_mode == "risk_per_trade":
+        if atr is None or not math.isfinite(float(atr)):
+            return EntrySizingResult(qty_raw=0.0, qty_final=0.0, stop_distance=None, sizing_reason="invalid_atr")
+        stop_distance = float(stop_atr) * float(atr)
+        if stop_distance <= 0 or not math.isfinite(stop_distance):
+            return EntrySizingResult(
+                qty_raw=0.0,
+                qty_final=0.0,
+                stop_distance=stop_distance,
+                sizing_reason="invalid_stop_distance",
+            )
+
+        qty_raw = max(float(risk_per_trade_usd), 0.0) / stop_distance
+        if max_position_notional_usd is not None and max_position_notional_usd > 0:
+            qty_cap = float(max_position_notional_usd) / float(raw_entry_price)
+            qty_raw = min(qty_raw, qty_cap)
+
+        qty_final = round_down_to_step(qty_raw, qty_step)
+        if qty_final <= 0:
+            return EntrySizingResult(
+                qty_raw=qty_raw,
+                qty_final=qty_final,
+                stop_distance=stop_distance,
+                sizing_reason="qty_rounded_to_zero",
+            )
+        return EntrySizingResult(qty_raw=qty_raw, qty_final=qty_final, stop_distance=stop_distance, sizing_reason=None)
+
+    notional_budget = max(float(position_size_usd), 1.0)
+    if max_position_notional_usd is not None and max_position_notional_usd > 0:
+        notional_budget = min(notional_budget, float(max_position_notional_usd))
+    qty_raw = notional_budget / float(raw_entry_price)
+    qty_final = round_down_to_step(qty_raw, qty_step)
+    if qty_final <= 0:
+        return EntrySizingResult(qty_raw=qty_raw, qty_final=qty_final, stop_distance=None, sizing_reason="qty_rounded_to_zero")
+    stop_distance = None
+    if atr is not None and math.isfinite(float(atr)):
+        stop_distance = float(stop_atr) * float(atr)
+    return EntrySizingResult(qty_raw=qty_raw, qty_final=qty_final, stop_distance=stop_distance, sizing_reason=None)
 
 
 @dataclass(slots=True)
@@ -170,6 +282,17 @@ class TradingRuntime:
         ts: datetime,
         decision: str,
         reasons: list[str],
+        sizing_mode: str | None = None,
+        risk_per_trade_usd: float | None = None,
+        stop_distance: float | None = None,
+        qty_raw: float | None = None,
+        qty_final: float | None = None,
+        notional: float | None = None,
+        htf_timeframe: str | None = None,
+        trend_state: str | None = None,
+        chop_state: str | None = None,
+        bb_width_norm: float | None = None,
+        atr_pct: float | None = None,
     ) -> None:
         payload = {
             "symbol": symbol,
@@ -180,8 +303,28 @@ class TradingRuntime:
             "regime_label": None,
             "anomaly_flags": [],
             "rca_event_id": None,
+            "sizing_mode": sizing_mode,
+            "risk_per_trade_usd": risk_per_trade_usd,
+            "stop_distance": stop_distance,
+            "qty_raw": qty_raw,
+            "qty_final": qty_final,
+            "notional": notional,
+            "htf_timeframe": htf_timeframe,
+            "trend_state": trend_state,
+            "chop_state": chop_state,
+            "bb_width_norm": bb_width_norm,
+            "atr_pct": atr_pct,
         }
         logger.info("decision_event %s", json.dumps(payload, separators=(",", ":"), sort_keys=True))
+
+    @staticmethod
+    def _select_htf_up_to(htf_df: pd.DataFrame, decision_ts: datetime) -> pd.DataFrame:
+        if htf_df is None or len(htf_df) == 0:
+            return htf_df.iloc[0:0]
+        frame = htf_df.copy()
+        ts_col = pd.to_datetime(frame["ts"]).dt.tz_localize(None)
+        mask = ts_col <= decision_ts
+        return frame.loc[mask].copy()
 
     def _current_risk_and_limit(self, *, symbol: str, venue: str, timeframe: str, execution_mode: str, per_symbol_limit: float) -> tuple[float, float]:
         policy = self.cfg.trading.risk_budget_policy
@@ -298,7 +441,15 @@ class TradingRuntime:
             return
 
         indicators = ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"]
-        out = compute(frame, indicators, params.indicator_params())
+        indicator_params = params.indicator_params()
+        bb_entry_mode = str(self.cfg.trading.bb_entry_mode)
+        if bb_entry_mode != "off":
+            indicators.append("bbands")
+            indicator_params["bollinger"] = {
+                "length": int(self.cfg.indicators.bollinger.length),
+                "stdev": float(self.cfg.indicators.bollinger.stdev),
+            }
+        out = compute(frame, indicators, indicator_params)
         if len(out) < 2:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
@@ -318,6 +469,29 @@ class TradingRuntime:
 
         prev = out.iloc[-2]
         bar = out.iloc[-1]
+        decision_ts = pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None)
+
+        regime = {
+            "trend_state": "neutral",
+            "chop_state": "unknown",
+            "bb_width_norm": None,
+            "atr_pct": None,
+        }
+        htf_timeframe: str | None = None
+        if self.cfg.trading.use_regime_filter:
+            htf_timeframe = self.cfg.trading.htf_timeframe
+            htf_frame = self.candle_repo.get_candles(
+                symbol=symbol,
+                timeframe=htf_timeframe,
+                venue=venue,
+                start=None,
+                end=None,
+                limit=max(500, self.cfg.ingestion.warmup_bars),
+                latest=True,
+            )
+            aligned = self._select_htf_up_to(htf_frame, decision_ts)
+            regime = compute_htf_regime(aligned, self.cfg)
+
         open_position = self.trading_repo.get_open_position(symbol, venue, timeframe, execution_mode)
 
         constraints = self._constraints_for_symbol(symbol)
@@ -326,8 +500,8 @@ class TradingRuntime:
             long_allowed = trade_side_mode in {"long_only", "long_short"}
             short_allowed = trade_side_mode in {"short_only", "long_short"}
 
-            long_ok, long_note = self._entry_diagnostics_long(prev, params)
-            short_ok, short_note = self._entry_diagnostics_short(prev, params)
+            long_ok, long_note = self._entry_diagnostics_long(prev, params, bb_entry_mode)
+            short_ok, short_note = self._entry_diagnostics_short(prev, params, bb_entry_mode)
 
             chosen_side: str | None = None
             chosen_note = ""
@@ -352,30 +526,173 @@ class TradingRuntime:
                 self._emit_decision_log(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    ts=decision_ts,
                     decision="hold",
                     reasons=[f"no_entry_mode={trade_side_mode}", long_note, short_note],
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
                 )
                 return
 
-            raw_entry_price = float(bar["open"])
-            notional_budget = max(self.cfg.trading.position_size_usd, 1.0)
-            qty = notional_budget / raw_entry_price if raw_entry_price > 0 else 0.0
-            qty = round_down_to_step(qty, constraints.qty_step)
-            if qty <= 0:
+            if self.cfg.trading.use_regime_filter and regime.get("chop_state") == "chop":
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
                     default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="sizing_invalid",
-                    note=f"qty rounded to zero (qty_step={constraints.qty_step})",
+                    state="chop_blocked",
+                    note=(
+                        f"htf={htf_timeframe}, trend={regime.get('trend_state')}, chop={regime.get('chop_state')}, "
+                        f"bb_width_norm={regime.get('bb_width_norm')}, atr_pct={regime.get('atr_pct')}"
+                    ),
                     log_event=True,
                 )
                 self._emit_decision_log(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    ts=decision_ts,
                     decision="hold",
-                    reasons=["sizing_invalid"],
+                    reasons=["blocked_by_chop_filter"],
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            if self.cfg.trading.use_regime_filter:
+                trend_state = regime.get("trend_state")
+                trend_ok = (chosen_side == "long" and trend_state == "bull") or (
+                    chosen_side == "short" and trend_state == "bear"
+                )
+                if not trend_ok:
+                    self.trading_repo.set_asset_state(
+                        symbol=symbol,
+                        default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                        state="regime_blocked",
+                        note=(
+                            f"htf={htf_timeframe}, side={chosen_side}, trend={regime.get('trend_state')}, "
+                            f"chop={regime.get('chop_state')}, bb_width_norm={regime.get('bb_width_norm')}, atr_pct={regime.get('atr_pct')}"
+                        ),
+                        log_event=True,
+                    )
+                    self._emit_decision_log(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        ts=decision_ts,
+                        decision="hold",
+                        reasons=["blocked_by_regime_trend"],
+                        htf_timeframe=htf_timeframe,
+                        trend_state=regime.get("trend_state"),
+                        chop_state=regime.get("chop_state"),
+                        bb_width_norm=regime.get("bb_width_norm"),
+                        atr_pct=regime.get("atr_pct"),
+                    )
+                    return
+
+            last_exit = self.trading_repo.get_last_exit(
+                symbol=symbol,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            hour_window_start = decision_ts - timeframe_to_timedelta("1h")
+            day_window_start = decision_ts - timeframe_to_timedelta("1d")
+            entries_last_hour = self.trading_repo.count_entries(
+                symbol=symbol,
+                since_ts=hour_window_start,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            entries_last_day = self.trading_repo.count_entries(
+                symbol=symbol,
+                since_ts=day_window_start,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            guard = evaluate_entry_guards(
+                decision_ts=decision_ts,
+                timeframe=timeframe,
+                last_exit_ts=last_exit.ts if last_exit is not None else None,
+                last_exit_reason=last_exit.reason if last_exit is not None else None,
+                cooldown_bars_after_exit=int(self.cfg.trading.cooldown_bars_after_exit),
+                cooldown_bars_after_stop=int(self.cfg.trading.cooldown_bars_after_stop),
+                entries_last_hour=entries_last_hour,
+                entries_last_day=entries_last_day,
+                max_entries_per_hour=int(self.cfg.trading.max_entries_per_hour),
+                max_entries_per_day=int(self.cfg.trading.max_entries_per_day),
+            )
+            if guard.blocked_reason is not None:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state=guard.blocked_reason,
+                    note=guard.details,
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=[guard.blocked_reason],
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            raw_entry_price = float(bar["open"])
+            atr_for_sizing: float | None = None
+            if pd.notna(prev.get("atr")):
+                atr_for_sizing = float(prev["atr"])
+
+            sizing_result = compute_entry_sizing(
+                sizing_mode=self.cfg.trading.sizing_mode,
+                position_size_usd=float(self.cfg.trading.position_size_usd),
+                risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                max_position_notional_usd=self.cfg.trading.max_position_notional_usd,
+                raw_entry_price=raw_entry_price,
+                atr=atr_for_sizing,
+                stop_atr=float(params.stop_atr),
+                qty_step=float(constraints.qty_step),
+            )
+            qty = sizing_result.qty_final
+            if sizing_result.sizing_reason is not None:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="sizing_invalid",
+                    note=(
+                        f"mode={self.cfg.trading.sizing_mode}, reason={sizing_result.sizing_reason}, "
+                        f"atr={atr_for_sizing}, stop_distance={sizing_result.stop_distance}, "
+                        f"qty_raw={sizing_result.qty_raw:.8f}, qty_final={sizing_result.qty_final:.8f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["sizing_invalid", f"reason={sizing_result.sizing_reason}"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=sizing_result.qty_final,
+                    notional=None,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
                 )
                 return
 
@@ -398,28 +715,85 @@ class TradingRuntime:
                 self._emit_decision_log(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    ts=decision_ts,
                     decision="hold",
                     reasons=["execution_failed", "entry_failed"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=sizing_result.qty_final,
+                    notional=None,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
                 )
                 logger.exception("Execution adapter entry failed for %s: %s", symbol, exc)
                 return
-            if constraints.min_notional_usd > 0 and entry_fill.notional_usd < constraints.min_notional_usd:
+
+            entry_notional = float(entry_fill.price) * float(entry_fill.qty)
+            max_position_notional = self.cfg.trading.max_position_notional_usd
+            if max_position_notional is not None and max_position_notional > 0 and entry_notional > max_position_notional:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
                     default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="min_notional_blocked",
+                    state="max_notional_blocked",
                     note=(
-                        f"notional={entry_fill.notional_usd:.4f} < min_notional={constraints.min_notional_usd:.4f}"
+                        f"notional={entry_notional:.4f} > max_position_notional={max_position_notional:.4f}; "
+                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={entry_fill.qty:.8f}"
                     ),
                     log_event=True,
                 )
                 self._emit_decision_log(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["max_notional_blocked"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=float(entry_fill.qty),
+                    notional=entry_notional,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            if constraints.min_notional_usd > 0 and entry_notional < constraints.min_notional_usd:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="min_notional_blocked",
+                    note=(
+                        f"notional={entry_notional:.4f} < min_notional={constraints.min_notional_usd:.4f}; "
+                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={entry_fill.qty:.8f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
                     decision="hold",
                     reasons=["min_notional_blocked"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=float(entry_fill.qty),
+                    notional=entry_notional,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
                 )
                 return
 
@@ -458,9 +832,14 @@ class TradingRuntime:
                 self._emit_decision_log(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                    ts=decision_ts,
                     decision="hold",
                     reasons=["risk_blocked"],
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
                 )
                 return
 
@@ -484,7 +863,9 @@ class TradingRuntime:
                 state="position_opened",
                 note=(
                     f"mode={execution_mode}, side={chosen_side}, fill={entry_fill.price:.6f}, "
-                    f"qty={entry_fill.qty:.6f}, fee={entry_fill.fee_usd:.6f}; {chosen_note}"
+                    f"qty={entry_fill.qty:.6f}, fee={entry_fill.fee_usd:.6f}, notional={entry_notional:.6f}, "
+                    f"sizing_mode={self.cfg.trading.sizing_mode}, risk_per_trade={self.cfg.trading.risk_per_trade_usd:.4f}, "
+                    f"stop_distance={sizing_result.stop_distance}, qty_raw={sizing_result.qty_raw:.8f}; {chosen_note}"
                 ),
                 log_event=True,
             )
@@ -500,15 +881,26 @@ class TradingRuntime:
             self._emit_decision_log(
                 symbol=symbol,
                 timeframe=timeframe,
-                ts=pd.to_datetime(bar["ts"]).to_pydatetime().replace(tzinfo=None),
+                ts=decision_ts,
                 decision="enter_long" if chosen_side == "long" else "enter_short",
                 reasons=[chosen_note],
+                sizing_mode=self.cfg.trading.sizing_mode,
+                risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                stop_distance=sizing_result.stop_distance,
+                qty_raw=sizing_result.qty_raw,
+                qty_final=float(entry_fill.qty),
+                notional=entry_notional,
+                htf_timeframe=htf_timeframe,
+                trend_state=regime.get("trend_state"),
+                chop_state=regime.get("chop_state"),
+                bb_width_norm=regime.get("bb_width_norm"),
+                atr_pct=regime.get("atr_pct"),
             )
             return
 
         self._manage_open_position(open_position, prev, bar, params, constraints)
 
-    def _entry_diagnostics_long(self, prev: pd.Series, params: StrategyParams) -> tuple[bool, str]:
+    def _entry_diagnostics_long(self, prev: pd.Series, params: StrategyParams, bb_entry_mode: str) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
         missing: list[str] = []
         if pd.isna(prev.get("rsi")):
@@ -519,6 +911,8 @@ class TradingRuntime:
             missing.append(fast_col)
         if pd.isna(prev.get("close")):
             missing.append("close")
+        if bb_entry_mode != "off" and pd.isna(prev.get("bb_lower")):
+            missing.append("bb_lower")
         if missing:
             return False, f"missing={','.join(missing)}"
 
@@ -528,13 +922,19 @@ class TradingRuntime:
         ema_fast = float(prev[fast_col])
         pass_rsi = rsi <= params.rsi_entry
         pass_trend = close > ema_fast
+        pass_bb = True
+        bb_note = "bb=off"
+        if bb_entry_mode == "touch_revert":
+            bb_lower = float(prev["bb_lower"])
+            pass_bb = close <= bb_lower
+            bb_note = f", close={close:.6f}<=bb_lower={bb_lower:.6f}({pass_bb})"
         note = (
             f"long: rsi={rsi:.2f}<={params.rsi_entry:.2f}({pass_rsi}), "
-            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}), atr={atr:.6f}"
+            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend, note
+        return pass_rsi and pass_trend and pass_bb, note
 
-    def _entry_diagnostics_short(self, prev: pd.Series, params: StrategyParams) -> tuple[bool, str]:
+    def _entry_diagnostics_short(self, prev: pd.Series, params: StrategyParams, bb_entry_mode: str) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
         missing: list[str] = []
         if pd.isna(prev.get("rsi")):
@@ -545,6 +945,8 @@ class TradingRuntime:
             missing.append(fast_col)
         if pd.isna(prev.get("close")):
             missing.append("close")
+        if bb_entry_mode != "off" and pd.isna(prev.get("bb_upper")):
+            missing.append("bb_upper")
         if missing:
             return False, f"short: missing={','.join(missing)}"
 
@@ -554,11 +956,17 @@ class TradingRuntime:
         ema_fast = float(prev[fast_col])
         pass_rsi = rsi >= params.rsi_exit
         pass_trend = close < ema_fast
+        pass_bb = True
+        bb_note = "bb=off"
+        if bb_entry_mode == "touch_revert":
+            bb_upper = float(prev["bb_upper"])
+            pass_bb = close >= bb_upper
+            bb_note = f", close={close:.6f}>=bb_upper={bb_upper:.6f}({pass_bb})"
         note = (
             f"short: rsi={rsi:.2f}>={params.rsi_exit:.2f}({pass_rsi}), "
-            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}), atr={atr:.6f}"
+            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend, note
+        return pass_rsi and pass_trend and pass_bb, note
 
     def _manage_open_position(
         self,

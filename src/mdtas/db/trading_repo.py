@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from mdtas.db.models import AssetControl, AssetEngineLog, Position, Trade
+
+
+@dataclass(slots=True)
+class ExitInfo:
+    ts: datetime
+    reason: str
 
 
 class TradingRepository:
@@ -297,3 +304,51 @@ class TradingRepository:
                 unit_risk = max(entry_price - stop_price, 0.0)
             total += (unit_risk * float(item.qty)) + float(item.entry_fee)
         return float(total)
+
+    def count_entries(
+        self,
+        symbol: str,
+        since_ts: datetime,
+        venue: str | None = None,
+        timeframe: str | None = None,
+        execution_mode: str | None = None,
+    ) -> int:
+        clauses = [
+            Position.symbol == symbol,
+            Position.entry_ts >= since_ts,
+        ]
+        if venue is not None:
+            clauses.append(Position.venue == venue)
+        if timeframe is not None:
+            clauses.append(Position.timeframe == timeframe)
+        if execution_mode is not None:
+            clauses.append(Position.execution_mode == execution_mode)
+
+        stmt = select(func.count(Position.id)).where(and_(*clauses))
+        count = self.session.scalar(stmt)
+        return int(count or 0)
+
+    def get_last_exit(
+        self,
+        symbol: str,
+        venue: str | None = None,
+        timeframe: str | None = None,
+        execution_mode: str | None = None,
+    ) -> ExitInfo | None:
+        clauses = [Trade.symbol == symbol]
+        if venue is not None:
+            clauses.append(Trade.venue == venue)
+        if timeframe is not None:
+            clauses.append(Trade.timeframe == timeframe)
+        if execution_mode is not None:
+            clauses.append(Trade.execution_mode == execution_mode)
+
+        row = self.session.scalar(
+            select(Trade)
+            .where(and_(*clauses))
+            .order_by(Trade.exit_ts.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return ExitInfo(ts=row.exit_ts, reason=row.exit_reason)
