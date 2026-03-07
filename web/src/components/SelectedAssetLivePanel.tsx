@@ -61,7 +61,15 @@ export default function SelectedAssetLivePanel({ symbol, assetControl, openPosit
                       : "Long"
                   : "-"}
               </td>
-              <td style={{ padding: 8 }}>{assetControl ? (assetControl.bb_entry_mode === "touch_revert" ? "TouchRevert" : "Off") : "-"}</td>
+              <td style={{ padding: 8 }}>
+                {assetControl
+                  ? assetControl.bb_entry_mode === "touch_revert"
+                    ? "TouchRevert"
+                    : assetControl.bb_entry_mode === "range_revert"
+                      ? "RangeRevert"
+                      : "Off"
+                  : "-"}
+              </td>
               <td style={{ textAlign: "right", padding: 8 }}>{assetControl ? num(assetControl.current_risk_usd, 4) : "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.last_run_ts)?.toLocaleString() ?? "-"}</td>
               <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.next_run_ts)?.toLocaleString() ?? "-"}</td>

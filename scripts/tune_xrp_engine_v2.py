@@ -41,13 +41,32 @@ class Params:
     max_entries_per_hour: int
     max_entries_per_day: int
     use_regime_filter: bool
+    bb_entry_mode: str
+    bb_range_threshold_pct: float
+    momentum_swing_enabled: bool
+    momentum_pivot_left_bars: int
+    momentum_pivot_right_bars: int
+    momentum_lookback_bars: int
+    momentum_roc_length: int
+    momentum_min_roc: float
 
     def indicator_params(self) -> dict:
-        return {
+        out = {
             "rsi": {"length": self.rsi_length},
             "atr": {"length": self.atr_length},
             "ema_lengths": [self.ema_fast, self.ema_slow],
         }
+        if self.bb_entry_mode != "off":
+            out["bollinger"] = {"length": 20, "stdev": 2.0}
+        if self.momentum_swing_enabled:
+            out["momentum_swing"] = {
+                "pivot_left_bars": self.momentum_pivot_left_bars,
+                "pivot_right_bars": self.momentum_pivot_right_bars,
+                "lookback_bars": self.momentum_lookback_bars,
+                "roc_length": self.momentum_roc_length,
+                "min_roc": self.momentum_min_roc,
+            }
+        return out
 
 
 def load_candles(db_path: Path, symbol: str, venue: str, timeframe: str, lookback_days: int) -> pd.DataFrame:
@@ -86,7 +105,12 @@ def align_htf(htf_df: pd.DataFrame, ts_naive: datetime) -> pd.DataFrame:
 
 
 def backtest(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, params: Params, cfg: AppConfig, timeframe: str, fee_bps: float, slippage_bps: float) -> dict:
-    work = compute(df_ltf, ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"], params.indicator_params())
+    indicators = ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"]
+    if params.bb_entry_mode != "off":
+        indicators.append("bbands")
+    if params.momentum_swing_enabled:
+        indicators.append("momentum_swing")
+    work = compute(df_ltf, indicators, params.indicator_params())
     fast_col = f"ema{params.ema_fast}"
 
     cfg.trading.use_regime_filter = bool(params.use_regime_filter)
@@ -100,6 +124,14 @@ def backtest(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, params: Params, cfg: Ap
     cfg.trading.sizing_mode = "risk_per_trade"
     cfg.trading.risk_per_trade_usd = 5.0
     cfg.trading.max_position_notional_usd = 25.0
+    cfg.trading.bb_entry_mode = params.bb_entry_mode
+    cfg.trading.bb_range_threshold_pct = float(params.bb_range_threshold_pct)
+    cfg.trading.momentum_swing_enabled = bool(params.momentum_swing_enabled)
+    cfg.trading.momentum_pivot_left_bars = int(params.momentum_pivot_left_bars)
+    cfg.trading.momentum_pivot_right_bars = int(params.momentum_pivot_right_bars)
+    cfg.trading.momentum_lookback_bars = int(params.momentum_lookback_bars)
+    cfg.trading.momentum_roc_length = int(params.momentum_roc_length)
+    cfg.trading.momentum_min_roc = float(params.momentum_min_roc)
 
     fee = fee_bps / 10000.0
     slippage = slippage_bps / 10000.0
@@ -129,6 +161,16 @@ def backtest(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, params: Params, cfg: Ap
                 equity_curve.append(cash)
                 continue
 
+            if params.bb_entry_mode != "off" and pd.isna(prev.get("bb_lower")):
+                equity_curve.append(cash)
+                continue
+            if params.bb_entry_mode == "range_revert" and pd.isna(prev.get("bb_upper")):
+                equity_curve.append(cash)
+                continue
+            if params.momentum_swing_enabled and pd.isna(prev.get("swing_long_ready")):
+                equity_curve.append(cash)
+                continue
+
             if cfg.trading.use_regime_filter:
                 htf_up_to = align_htf(df_htf, ts)
                 regime = compute_htf_regime(htf_up_to, cfg)
@@ -154,7 +196,30 @@ def backtest(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, params: Params, cfg: Ap
                 equity_curve.append(cash)
                 continue
 
-            entry_signal = float(prev["rsi"]) <= params.rsi_entry and float(prev["close"]) > float(prev[fast_col])
+            pass_bb = True
+            if params.bb_entry_mode == "touch_revert":
+                pass_bb = float(prev["close"]) <= float(prev["bb_lower"])
+            elif params.bb_entry_mode == "range_revert":
+                bb_lower = float(prev["bb_lower"])
+                bb_upper = float(prev["bb_upper"])
+                bb_range = bb_upper - bb_lower
+                threshold = min(max(float(params.bb_range_threshold_pct), 0.0), 1.0)
+                if bb_range <= 0:
+                    pass_bb = False
+                else:
+                    cutoff = bb_lower + (threshold * bb_range)
+                    pass_bb = float(prev["close"]) <= cutoff
+
+            pass_momentum = True
+            if params.momentum_swing_enabled:
+                pass_momentum = bool(prev["swing_long_ready"])
+
+            entry_signal = (
+                float(prev["rsi"]) <= params.rsi_entry
+                and float(prev["close"]) > float(prev[fast_col])
+                and pass_bb
+                and pass_momentum
+            )
             if not entry_signal:
                 equity_curve.append(cash)
                 continue
@@ -252,11 +317,19 @@ def backtest(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, params: Params, cfg: Ap
     }
 
 
-def random_param(rng: random.Random) -> Params:
+def random_param(rng: random.Random, force_momentum_swing: bool | None = None, force_bb_mode: str | None = None) -> Params:
     ema_fast = rng.choice([7, 8, 9, 12, 16])
     ema_slow = rng.choice([33, 34, 50, 72])
     if ema_fast >= ema_slow:
         ema_fast = max(3, ema_slow - 1)
+    bb_mode = rng.choice(["off", "range_revert"])
+    if force_bb_mode is not None:
+        bb_mode = force_bb_mode
+
+    momentum_enabled = rng.choice([True, False])
+    if force_momentum_swing is not None:
+        momentum_enabled = force_momentum_swing
+
     return Params(
         rsi_length=rng.choice([10, 14, 18, 19, 21]),
         atr_length=rng.choice([8, 10, 14, 15, 21]),
@@ -273,6 +346,14 @@ def random_param(rng: random.Random) -> Params:
         max_entries_per_hour=rng.choice([0, 4, 6, 8, 10]),
         max_entries_per_day=rng.choice([0, 20, 30, 40, 50]),
         use_regime_filter=rng.choice([True, False]),
+        bb_entry_mode=bb_mode,
+        bb_range_threshold_pct=rng.choice([0.6, 0.65, 0.7, 0.75, 0.8, 0.85]),
+        momentum_swing_enabled=momentum_enabled,
+        momentum_pivot_left_bars=rng.choice([0, 1, 2, 3]),
+        momentum_pivot_right_bars=rng.choice([0, 1, 2, 3]),
+        momentum_lookback_bars=rng.choice([4, 6, 8, 10, 12, 16, 20]),
+        momentum_roc_length=rng.choice([1, 2, 3, 5, 8]),
+        momentum_min_roc=rng.choice([0.0, 0.0001, 0.0003, 0.0005, 0.001, 0.0015, 0.002, 0.003]),
     )
 
 
@@ -304,6 +385,8 @@ def main():
     ap.add_argument("--iters", type=int, default=180)
     ap.add_argument("--fee-bps", type=float, default=6.0)
     ap.add_argument("--slippage-bps", type=float, default=2.0)
+    ap.add_argument("--force-momentum-swing", choices=["auto", "on", "off"], default="auto")
+    ap.add_argument("--force-bb-mode", choices=["auto", "off", "range_revert"], default="auto")
     args = ap.parse_args()
 
     db = Path(args.db_path)
@@ -321,7 +404,20 @@ def main():
     htf_test = htf.loc[htf_ts >= split_ts].reset_index(drop=True)
 
     rng = random.Random(args.seed)
-    candidates = [random_param(rng) for _ in range(args.iters)]
+    force_momentum_swing: bool | None = None
+    if args.force_momentum_swing == "on":
+        force_momentum_swing = True
+    elif args.force_momentum_swing == "off":
+        force_momentum_swing = False
+
+    force_bb_mode: str | None = None
+    if args.force_bb_mode != "auto":
+        force_bb_mode = args.force_bb_mode
+
+    candidates = [
+        random_param(rng, force_momentum_swing=force_momentum_swing, force_bb_mode=force_bb_mode)
+        for _ in range(args.iters)
+    ]
     results = evaluate(ltf_train, ltf_test, htf_train, htf_test, candidates, args.ltf, args.fee_bps, args.slippage_bps)
     best = results[0]
 

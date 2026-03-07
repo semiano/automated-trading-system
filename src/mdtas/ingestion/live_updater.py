@@ -248,21 +248,13 @@ def _run_ws_trades_loop(
         last_one_min_close_price[symbol] = float(candle.close)
         return out
 
-    def _on_trade(trade: Trade) -> None:
-        closed = aggregator.ingest_trade(trade)
-        if not closed:
+    def _persist_one_minute_batch(one_min_rows: list[AggCandle]) -> None:
+        if not one_min_rows:
             return
 
-        expanded: list[AggCandle] = []
-        for one_min in closed:
-            expanded.extend(_expand_with_synthetic_gaps(one_min))
+        repo.upsert_candles([_agg_to_dto(item, venue) for item in one_min_rows])
 
-        if not expanded:
-            return
-
-        repo.upsert_candles([_agg_to_dto(item, venue) for item in expanded])
-
-        for one_min in expanded:
+        for one_min in one_min_rows:
             one_minute_buffers[one_min.symbol].append(one_min)
 
             for target_tf in rollup_targets:
@@ -284,12 +276,59 @@ def _run_ws_trades_loop(
 
             _maybe_repair_symbol_gaps(one_min.symbol)
 
+    def _on_trade(trade: Trade) -> None:
+        closed = aggregator.ingest_trade(trade)
+        if not closed:
+            return
+
+        expanded: list[AggCandle] = []
+        for one_min in closed:
+            expanded.extend(_expand_with_synthetic_gaps(one_min))
+
+        if not expanded:
+            return
+
+        _persist_one_minute_batch(expanded)
+
+    def _heartbeat_tick() -> None:
+        now = datetime.utcnow().replace(microsecond=0)
+        target_end = align_to_candle_close(now, "1m") - timeframe_to_timedelta("1m")
+        target_close_ms = int(target_end.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        synthetic_rows: list[AggCandle] = []
+        for symbol in symbols:
+            prev_close_ms = last_one_min_close_ms.get(symbol)
+            prev_close_price = last_one_min_close_price.get(symbol)
+            if prev_close_ms is None or prev_close_price is None:
+                continue
+            if prev_close_ms >= target_close_ms:
+                continue
+
+            for gap_close_ms in range(prev_close_ms + 60_000, target_close_ms + 1, 60_000):
+                synthetic_rows.append(
+                    AggCandle(
+                        symbol=symbol,
+                        timeframe="1m",
+                        ts_close=gap_close_ms,
+                        open=prev_close_price,
+                        high=prev_close_price,
+                        low=prev_close_price,
+                        close=prev_close_price,
+                        volume=0.0,
+                    )
+                )
+                last_one_min_close_ms[symbol] = gap_close_ms
+
+        if synthetic_rows:
+            logger.info("Heartbeat synthesized %s missing 1m candles", len(synthetic_rows))
+            _persist_one_minute_batch(synthetic_rows)
+
     stream = CoinbaseWsTradeStream(
         symbols=symbols,
         reconnect_initial_backoff_seconds=cfg.ingestion.ws_reconnect_initial_backoff_seconds,
         reconnect_max_backoff_seconds=cfg.ingestion.ws_reconnect_max_backoff_seconds,
     )
-    stream.run(on_trade_callback=_on_trade, should_continue=should_continue)
+    stream.run(on_trade_callback=_on_trade, should_continue=should_continue, on_idle_callback=_heartbeat_tick)
 
 
 def run_live_once(

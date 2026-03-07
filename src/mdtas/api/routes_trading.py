@@ -186,6 +186,8 @@ def list_asset_controls(
                     "stop_atr": params.stop_atr,
                     "take_profit_atr": params.take_profit_atr,
                     "max_hold_bars": params.max_hold_bars,
+                    "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
+                    "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
                 },
             )
         )
@@ -249,6 +251,8 @@ def update_asset_control(
             "stop_atr": params.stop_atr,
             "take_profit_atr": params.take_profit_atr,
             "max_hold_bars": params.max_hold_bars,
+            "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
+            "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
         },
     )
 

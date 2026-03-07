@@ -451,7 +451,16 @@ class TradingRuntime:
         bars_required_ema = params.ema_slow + 5
         bars_required_rsi = params.rsi_length + 5
         bars_required_atr = params.atr_length + 5
-        required_bars = max(bars_required_ema, bars_required_rsi, bars_required_atr)
+        bars_required_momentum = 0
+        if self.cfg.trading.momentum_swing_enabled:
+            bars_required_momentum = (
+                int(self.cfg.trading.momentum_roc_length)
+                + int(self.cfg.trading.momentum_pivot_left_bars)
+                + int(self.cfg.trading.momentum_pivot_right_bars)
+                + int(self.cfg.trading.momentum_lookback_bars)
+                + 5
+            )
+        required_bars = max(bars_required_ema, bars_required_rsi, bars_required_atr, bars_required_momentum)
         available_bars = len(frame)
         if available_bars < required_bars:
             missing_bars = required_bars - available_bars
@@ -519,6 +528,15 @@ class TradingRuntime:
             indicator_params["bollinger"] = {
                 "length": int(self.cfg.indicators.bollinger.length),
                 "stdev": float(self.cfg.indicators.bollinger.stdev),
+            }
+        if self.cfg.trading.momentum_swing_enabled:
+            indicators.append("momentum_swing")
+            indicator_params["momentum_swing"] = {
+                "pivot_left_bars": int(self.cfg.trading.momentum_pivot_left_bars),
+                "pivot_right_bars": int(self.cfg.trading.momentum_pivot_right_bars),
+                "lookback_bars": int(self.cfg.trading.momentum_lookback_bars),
+                "roc_length": int(self.cfg.trading.momentum_roc_length),
+                "min_roc": float(self.cfg.trading.momentum_min_roc),
             }
         out = compute(frame, indicators, indicator_params)
         if len(out) < 2:
@@ -984,6 +1002,10 @@ class TradingRuntime:
             missing.append("close")
         if bb_entry_mode != "off" and pd.isna(prev.get("bb_lower")):
             missing.append("bb_lower")
+        if bb_entry_mode == "range_revert" and pd.isna(prev.get("bb_upper")):
+            missing.append("bb_upper")
+        if self.cfg.trading.momentum_swing_enabled and pd.isna(prev.get("swing_long_ready")):
+            missing.append("swing_long_ready")
         if missing:
             return False, f"missing={','.join(missing)}"
 
@@ -999,11 +1021,45 @@ class TradingRuntime:
             bb_lower = float(prev["bb_lower"])
             pass_bb = close <= bb_lower
             bb_note = f", close={close:.6f}<=bb_lower={bb_lower:.6f}({pass_bb})"
+        elif bb_entry_mode == "range_revert":
+            bb_lower = float(prev["bb_lower"])
+            bb_upper = float(prev["bb_upper"])
+            bb_range = bb_upper - bb_lower
+            threshold = min(max(float(self.cfg.trading.bb_range_threshold_pct), 0.0), 1.0)
+            if bb_range <= 0:
+                pass_bb = False
+                bb_note = f", invalid_bb_range={bb_range:.6f}(False)"
+            else:
+                cutoff = bb_lower + (threshold * bb_range)
+                pass_bb = close <= cutoff
+                bb_note = (
+                    f", close={close:.6f}<=long_cutoff={cutoff:.6f}({pass_bb}), "
+                    f"bb_range={bb_range:.6f}, threshold={threshold:.2f}"
+                )
+
+        pass_momentum = True
+        momentum_note = ", momentum=off"
+        if self.cfg.trading.momentum_swing_enabled:
+            pass_momentum = bool(prev["swing_long_ready"])
+            roc = prev.get("mom_roc")
+            if pd.notna(roc):
+                momentum_note = f", swing_long_ready={pass_momentum}, mom_roc={float(roc):.6f}"
+            else:
+                momentum_note = f", swing_long_ready={pass_momentum}, mom_roc=nan"
+
+        min_entry_atr_pct = max(0.0, float(self.cfg.trading.min_entry_atr_pct))
+        atr_pct = (atr / close) * 100.0 if close > 0 else float("nan")
+        pass_volatility = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+        volatility_note = (
+            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility})"
+            if min_entry_atr_pct > 0
+            else ", atr_pct_gate=off"
+        )
         note = (
             f"long: rsi={rsi:.2f}<={params.rsi_entry:.2f}({pass_rsi}), "
-            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
+            f"close={close:.6f}>{ema_fast:.6f}({pass_trend}){bb_note}{momentum_note}{volatility_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend and pass_bb, note
+        return pass_rsi and pass_trend and pass_bb and pass_momentum and bool(pass_volatility), note
 
     def _entry_diagnostics_short(self, prev: pd.Series, params: StrategyParams, bb_entry_mode: str) -> tuple[bool, str]:
         fast_col = f"ema{params.ema_fast}"
@@ -1018,6 +1074,10 @@ class TradingRuntime:
             missing.append("close")
         if bb_entry_mode != "off" and pd.isna(prev.get("bb_upper")):
             missing.append("bb_upper")
+        if bb_entry_mode == "range_revert" and pd.isna(prev.get("bb_lower")):
+            missing.append("bb_lower")
+        if self.cfg.trading.momentum_swing_enabled and pd.isna(prev.get("swing_short_ready")):
+            missing.append("swing_short_ready")
         if missing:
             return False, f"short: missing={','.join(missing)}"
 
@@ -1033,11 +1093,45 @@ class TradingRuntime:
             bb_upper = float(prev["bb_upper"])
             pass_bb = close >= bb_upper
             bb_note = f", close={close:.6f}>=bb_upper={bb_upper:.6f}({pass_bb})"
+        elif bb_entry_mode == "range_revert":
+            bb_lower = float(prev["bb_lower"])
+            bb_upper = float(prev["bb_upper"])
+            bb_range = bb_upper - bb_lower
+            threshold = min(max(float(self.cfg.trading.bb_range_threshold_pct), 0.0), 1.0)
+            if bb_range <= 0:
+                pass_bb = False
+                bb_note = f", invalid_bb_range={bb_range:.6f}(False)"
+            else:
+                cutoff = bb_upper - (threshold * bb_range)
+                pass_bb = close >= cutoff
+                bb_note = (
+                    f", close={close:.6f}>=short_cutoff={cutoff:.6f}({pass_bb}), "
+                    f"bb_range={bb_range:.6f}, threshold={threshold:.2f}"
+                )
+
+        pass_momentum = True
+        momentum_note = ", momentum=off"
+        if self.cfg.trading.momentum_swing_enabled:
+            pass_momentum = bool(prev["swing_short_ready"])
+            roc = prev.get("mom_roc")
+            if pd.notna(roc):
+                momentum_note = f", swing_short_ready={pass_momentum}, mom_roc={float(roc):.6f}"
+            else:
+                momentum_note = f", swing_short_ready={pass_momentum}, mom_roc=nan"
+
+        min_entry_atr_pct = max(0.0, float(self.cfg.trading.min_entry_atr_pct))
+        atr_pct = (atr / close) * 100.0 if close > 0 else float("nan")
+        pass_volatility = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+        volatility_note = (
+            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility})"
+            if min_entry_atr_pct > 0
+            else ", atr_pct_gate=off"
+        )
         note = (
             f"short: rsi={rsi:.2f}>={params.rsi_exit:.2f}({pass_rsi}), "
-            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}){bb_note}, atr={atr:.6f}"
+            f"close={close:.6f}<{ema_fast:.6f}({pass_trend}){bb_note}{momentum_note}{volatility_note}, atr={atr:.6f}"
         )
-        return pass_rsi and pass_trend and pass_bb, note
+        return pass_rsi and pass_trend and pass_bb and pass_momentum and bool(pass_volatility), note
 
     def _manage_open_position(
         self,
@@ -1060,10 +1154,12 @@ class TradingRuntime:
 
         indicator_exit = False
         if pd.notna(prev.get("rsi")) and pd.notna(prev.get(fast_col)) and pd.notna(prev.get("close")):
-            if is_short:
-                indicator_exit = float(prev["rsi"]) <= params.rsi_entry or float(prev["close"]) > float(prev[fast_col])
-            else:
-                indicator_exit = float(prev["rsi"]) >= params.rsi_exit or float(prev["close"]) < float(prev[fast_col])
+            min_hold_before_signal = max(0, int(self.cfg.trading.min_hold_bars_before_signal_exit))
+            if hold_bars >= min_hold_before_signal:
+                if is_short:
+                    indicator_exit = float(prev["rsi"]) <= params.rsi_entry or float(prev["close"]) > float(prev[fast_col])
+                else:
+                    indicator_exit = float(prev["rsi"]) >= params.rsi_exit or float(prev["close"]) < float(prev[fast_col])
 
         timed_exit = hold_bars >= params.max_hold_bars
         should_exit = stop_hit or tp_hit or indicator_exit or timed_exit

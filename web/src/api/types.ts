@@ -20,6 +20,11 @@ export type IndicatorRow = Candle & {
   ema200?: number | null;
   volume_sma?: number | null;
   vwap?: number | null;
+  mom_roc?: number | null;
+  swing_pivot_low?: boolean | null;
+  swing_pivot_high?: boolean | null;
+  swing_long_ready?: boolean | null;
+  swing_short_ready?: boolean | null;
 };
 
 export type Gap = {
@@ -83,7 +88,7 @@ export type AssetControl = {
   enabled: boolean;
   execution_mode: "sim" | "live";
   trade_side: "long_only" | "long_short" | "short_only";
-  bb_entry_mode: "off" | "touch_revert";
+  bb_entry_mode: "off" | "touch_revert" | "range_revert";
   soft_risk_limit_usd: number;
   current_risk_usd: number;
   last_run_ts?: string | null;

@@ -5,8 +5,8 @@ providers:
     rate_limit: true
 
 symbols:
-  - "HBAR/USDT"
-  - "XRP/USDT"
+  - "HBAR/USD"
+  - "XRP/USD"
 
 timeframes:
   - "1m"
@@ -57,7 +57,7 @@ trading:
   sizing_mode: "fixed_notional"
   risk_per_trade_usd: 5.0
   max_position_notional_usd: null
-  use_regime_filter: true
+  use_regime_filter: false
   htf_timeframe: "1h"
   regime_trend_ema_fast: 50
   regime_trend_ema_slow: 200
@@ -66,11 +66,20 @@ trading:
   chop_bb_stdev: 2.0
   chop_bb_width_min: 0.01
   chop_atr_pct_min: 0.003
-  bb_entry_mode: "touch_revert"
+  bb_entry_mode: "off"
+  bb_range_threshold_pct: 0.8
+  momentum_swing_enabled: true
+  momentum_pivot_left_bars: 0
+  momentum_pivot_right_bars: 3
+  momentum_lookback_bars: 6
+  momentum_roc_length: 1
+  momentum_min_roc: 0.0005
+  min_entry_atr_pct: 0.12
+  min_hold_bars_before_signal_exit: 5
   cooldown_bars_after_exit: 10
   cooldown_bars_after_stop: 30
   max_entries_per_hour: 6
-  max_entries_per_day: 40
+  max_entries_per_day: 30
   timezone: "UTC"
   execution_adapter: "paper"
   live_trading_enabled: false
@@ -93,7 +102,7 @@ trading:
     price_tick: null
     fee_bps: 6.0
   per_asset_constraints:
-    XRP/USDT:
+    XRP/USD:
       min_notional_usd: 10.0
       qty_step: 0.1
       price_tick: 0.0001
@@ -109,13 +118,13 @@ trading:
     take_profit_atr: 2.2
     max_hold_bars: 180
   per_asset_params:
-    XRP/USDT:
+    XRP/USD:
       rsi_length: 19
       atr_length: 10
-      ema_fast: 7
-      ema_slow: 50
-      rsi_entry: 34
-      rsi_exit: 64
-      stop_atr: 2.3
-      take_profit_atr: 1.4
-      max_hold_bars: 60
+      ema_fast: 12
+      ema_slow: 72
+      rsi_entry: 40
+      rsi_exit: 60
+      stop_atr: 1.2
+      take_profit_atr: 1.8
+      max_hold_bars: 100

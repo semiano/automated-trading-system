@@ -1,45 +1,10 @@
 $ErrorActionPreference = 'Stop'
-$src = Join-Path $PSScriptRoot '..\market-data-ta-service'
-$src = (Resolve-Path $src).Path
-$dst = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-function Merge-Directory {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$SourceDir,
-    [Parameter(Mandatory = $true)]
-    [string]$TargetDir
-  )
+Write-Warning "'flatten_project_root.ps1' is deprecated. Use 'maint_flatten_project_root.ps1' instead."
 
-  Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {
-    $targetPath = Join-Path $TargetDir $_.Name
-
-    if ($_.PSIsContainer -and (Test-Path -LiteralPath $targetPath) -and (Get-Item -LiteralPath $targetPath).PSIsContainer) {
-      Merge-Directory -SourceDir $_.FullName -TargetDir $targetPath
-      Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-      return
-    }
-
-    Move-Item -LiteralPath $_.FullName -Destination $targetPath -Force
-  }
+$target = Join-Path $PSScriptRoot 'maint_flatten_project_root.ps1'
+if (-not (Test-Path -LiteralPath $target)) {
+  throw "Missing target script: $target"
 }
 
-if (-not (Test-Path -LiteralPath $src)) {
-  Write-Host "Source folder not found: $src"
-  exit 0
-}
-
-Get-ChildItem -LiteralPath $src -Force | ForEach-Object {
-  $targetPath = Join-Path $dst $_.Name
-
-  if ($_.PSIsContainer -and (Test-Path -LiteralPath $targetPath) -and (Get-Item -LiteralPath $targetPath).PSIsContainer) {
-    Merge-Directory -SourceDir $_.FullName -TargetDir $targetPath
-    Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-  }
-  else {
-    Move-Item -LiteralPath $_.FullName -Destination $targetPath -Force
-  }
-}
-
-Remove-Item -LiteralPath $src -Recurse -Force
-Write-Host "Flatten complete."
+& $target

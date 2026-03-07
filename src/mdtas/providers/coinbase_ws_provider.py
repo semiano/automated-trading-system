@@ -31,7 +31,7 @@ class CoinbaseWsTradeStream:
         symbols: list[str],
         reconnect_initial_backoff_seconds: int = 1,
         reconnect_max_backoff_seconds: int = 30,
-        ws_url: str = "wss://ws-feed.exchange.coinbase.com",
+        ws_url: str = "wss://advanced-trade-ws.coinbase.com",
         queue_maxsize: int = 5000,
         ping_interval_seconds: int = 20,
         ping_timeout_seconds: int = 20,
@@ -129,11 +129,21 @@ class CoinbaseWsTradeStream:
 
         return out
 
-    async def _consumer_loop(self, queue: asyncio.Queue[str], on_trade_callback: Callable[[Trade], None]) -> None:
+    async def _consumer_loop(
+        self,
+        queue: asyncio.Queue[str],
+        on_trade_callback: Callable[[Trade], None],
+        on_idle_callback: Callable[[], None] | None = None,
+    ) -> None:
         while not self._stop_event.is_set() or not queue.empty():
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
+                if on_idle_callback is not None:
+                    try:
+                        on_idle_callback()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Coinbase WS idle callback error: %s", exc)
                 continue
 
             try:
@@ -186,9 +196,14 @@ class CoinbaseWsTradeStream:
             await asyncio.sleep(sleep_s)
             backoff_seconds = min(float(self.reconnect_max_backoff_seconds), backoff_seconds * 2.0)
 
-    async def _run_async(self, on_trade_callback: Callable[[Trade], None], should_continue: Callable[[], bool]) -> None:
+    async def _run_async(
+        self,
+        on_trade_callback: Callable[[Trade], None],
+        should_continue: Callable[[], bool],
+        on_idle_callback: Callable[[], None] | None = None,
+    ) -> None:
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=self.queue_maxsize)
-        consumer_task = asyncio.create_task(self._consumer_loop(queue, on_trade_callback))
+        consumer_task = asyncio.create_task(self._consumer_loop(queue, on_trade_callback, on_idle_callback=on_idle_callback))
         reader_task = asyncio.create_task(self._reader_loop(queue, should_continue))
 
         await reader_task
@@ -198,7 +213,12 @@ class CoinbaseWsTradeStream:
         with contextlib.suppress(Exception):
             await consumer_task
 
-    def run(self, on_trade_callback: Callable[[Trade], None], should_continue: Callable[[], bool] | None = None) -> None:
+    def run(
+        self,
+        on_trade_callback: Callable[[Trade], None],
+        should_continue: Callable[[], bool] | None = None,
+        on_idle_callback: Callable[[], None] | None = None,
+    ) -> None:
         if should_continue is None:
             should_continue = lambda: True
 
@@ -211,7 +231,7 @@ class CoinbaseWsTradeStream:
         signal.signal(signal.SIGINT, _handle_signal)
 
         try:
-            asyncio.run(self._run_async(on_trade_callback, should_continue))
+            asyncio.run(self._run_async(on_trade_callback, should_continue, on_idle_callback=on_idle_callback))
         finally:
             signal.signal(signal.SIGTERM, previous_sigterm)
             signal.signal(signal.SIGINT, previous_sigint)

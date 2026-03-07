@@ -432,7 +432,13 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       </button>
                     </div>
                   </td>
-                  <td style={{ padding: 8 }}>{row.bb_entry_mode === "touch_revert" ? "TouchRevert" : "Off"}</td>
+                  <td style={{ padding: 8 }}>
+                    {row.bb_entry_mode === "touch_revert"
+                      ? "TouchRevert"
+                      : row.bb_entry_mode === "range_revert"
+                        ? "RangeRevert"
+                        : "Off"}
+                  </td>
                   <td style={{ textAlign: "right", padding: 8 }}>
                     <input
                       type="number"

@@ -6,6 +6,7 @@ from mdtas.trading.execution import (
     gap_aware_raw_exit_price,
 )
 from mdtas.trading.runtime import TradingRuntime
+import pandas as pd
 
 
 def test_apply_slippage_buy_sell_semantics():
@@ -128,3 +129,191 @@ def test_runtime_risk_policy_per_symbol_uses_symbol_scope():
     assert current == 7.0
     assert limit == 55.0
     assert repo.calls[-1]["symbol"] == "XRP/USD"
+
+
+def test_range_revert_bb_threshold_long_short():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "range_revert"
+    cfg.trading.bb_range_threshold_pct = 0.8
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    long_pass_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.01,
+            "close": 18.0,
+            f"ema{params.ema_fast}": 17.0,
+            "bb_lower": 10.0,
+            "bb_upper": 20.0,
+        }
+    )
+    long_fail_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.01,
+            "close": 18.5,
+            f"ema{params.ema_fast}": 17.0,
+            "bb_lower": 10.0,
+            "bb_upper": 20.0,
+        }
+    )
+
+    short_pass_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.01,
+            "close": 12.0,
+            f"ema{params.ema_fast}": 13.0,
+            "bb_lower": 10.0,
+            "bb_upper": 20.0,
+        }
+    )
+    short_fail_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.01,
+            "close": 11.5,
+            f"ema{params.ema_fast}": 13.0,
+            "bb_lower": 10.0,
+            "bb_upper": 20.0,
+        }
+    )
+
+    long_pass, _ = runtime._entry_diagnostics_long(long_pass_row, params, "range_revert")
+    long_fail, _ = runtime._entry_diagnostics_long(long_fail_row, params, "range_revert")
+    short_pass, _ = runtime._entry_diagnostics_short(short_pass_row, params, "range_revert")
+    short_fail, _ = runtime._entry_diagnostics_short(short_fail_row, params, "range_revert")
+
+    assert long_pass is True
+    assert long_fail is False
+    assert short_pass is True
+    assert short_fail is False
+
+
+def test_momentum_swing_gates_long_short_entries():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "off"
+    cfg.trading.momentum_swing_enabled = True
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    long_pass_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.01,
+            "close": 18.0,
+            f"ema{params.ema_fast}": 17.0,
+            "swing_long_ready": True,
+            "mom_roc": 0.01,
+        }
+    )
+    long_fail_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.01,
+            "close": 18.0,
+            f"ema{params.ema_fast}": 17.0,
+            "swing_long_ready": False,
+            "mom_roc": 0.01,
+        }
+    )
+
+    short_pass_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.01,
+            "close": 12.0,
+            f"ema{params.ema_fast}": 13.0,
+            "swing_short_ready": True,
+            "mom_roc": -0.01,
+        }
+    )
+    short_fail_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.01,
+            "close": 12.0,
+            f"ema{params.ema_fast}": 13.0,
+            "swing_short_ready": False,
+            "mom_roc": -0.01,
+        }
+    )
+
+    long_pass, _ = runtime._entry_diagnostics_long(long_pass_row, params, "off")
+    long_fail, _ = runtime._entry_diagnostics_long(long_fail_row, params, "off")
+    short_pass, _ = runtime._entry_diagnostics_short(short_pass_row, params, "off")
+    short_fail, _ = runtime._entry_diagnostics_short(short_fail_row, params, "off")
+
+    assert long_pass is True
+    assert long_fail is False
+    assert short_pass is True
+    assert short_fail is False
+
+
+def test_min_entry_atr_pct_blocks_low_volatility_entries():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "off"
+    cfg.trading.momentum_swing_enabled = False
+    cfg.trading.min_entry_atr_pct = 0.12
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    low_vol_long_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.001,
+            "close": 1.50,
+            f"ema{params.ema_fast}": 1.40,
+        }
+    )
+    low_vol_short_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.001,
+            "close": 1.30,
+            f"ema{params.ema_fast}": 1.40,
+        }
+    )
+
+    long_ok, _ = runtime._entry_diagnostics_long(low_vol_long_row, params, "off")
+    short_ok, _ = runtime._entry_diagnostics_short(low_vol_short_row, params, "off")
+
+    assert long_ok is False
+    assert short_ok is False
+
+
+def test_min_entry_atr_pct_allows_high_volatility_entries():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "off"
+    cfg.trading.momentum_swing_enabled = False
+    cfg.trading.min_entry_atr_pct = 0.12
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    high_vol_long_row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 1.0,
+            "atr": 0.003,
+            "close": 1.50,
+            f"ema{params.ema_fast}": 1.40,
+        }
+    )
+    high_vol_short_row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 1.0,
+            "atr": 0.003,
+            "close": 1.30,
+            f"ema{params.ema_fast}": 1.40,
+        }
+    )
+
+    long_ok, _ = runtime._entry_diagnostics_long(high_vol_long_row, params, "off")
+    short_ok, _ = runtime._entry_diagnostics_short(high_vol_short_row, params, "off")
+
+    assert long_ok is True
+    assert short_ok is True

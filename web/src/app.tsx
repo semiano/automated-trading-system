@@ -307,6 +307,7 @@ export default function App() {
             panels={panels}
             openPositions={chartOpenPositions}
             closedTrades={chartClosedTrades}
+            assetControl={selectedAssetControl}
             crosshair={crosshair}
             setCrosshair={setCrosshair}
           />

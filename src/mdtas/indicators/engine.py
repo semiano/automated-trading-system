@@ -5,6 +5,7 @@ import pandas as pd
 from mdtas.indicators.atr import compute_atr
 from mdtas.indicators.bollinger import compute_bollinger
 from mdtas.indicators.ema import compute_ema
+from mdtas.indicators.momentum import compute_momentum_swing
 from mdtas.indicators.rsi import compute_rsi
 from mdtas.indicators.volume import compute_volume_sma
 from mdtas.indicators.vwap import compute_rolling_vwap
@@ -48,5 +49,18 @@ def compute(
 
     if "volume_sma" in req:
         out["volume_sma"] = compute_volume_sma(out, length=int(params.get("volume_sma", 20)))
+
+    if "momentum_swing" in req:
+        mom_cfg = params.get("momentum_swing", {})
+        mom = compute_momentum_swing(
+            out,
+            pivot_left_bars=int(mom_cfg.get("pivot_left_bars", 2)),
+            pivot_right_bars=int(mom_cfg.get("pivot_right_bars", 2)),
+            lookback_bars=int(mom_cfg.get("lookback_bars", 8)),
+            roc_length=int(mom_cfg.get("roc_length", 5)),
+            min_roc=float(mom_cfg.get("min_roc", 0.002)),
+        )
+        for col in mom.columns:
+            out[col] = mom[col]
 
     return out

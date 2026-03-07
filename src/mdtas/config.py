@@ -97,7 +97,16 @@ class TradingConfig(BaseModel):
     chop_bb_stdev: float = 2.0
     chop_bb_width_min: float = 0.01
     chop_atr_pct_min: float = 0.003
-    bb_entry_mode: Literal["off", "touch_revert"] = "off"
+    bb_entry_mode: Literal["off", "touch_revert", "range_revert"] = "off"
+    bb_range_threshold_pct: float = 0.8
+    momentum_swing_enabled: bool = False
+    momentum_pivot_left_bars: int = 2
+    momentum_pivot_right_bars: int = 2
+    momentum_lookback_bars: int = 8
+    momentum_roc_length: int = 5
+    momentum_min_roc: float = 0.002
+    min_entry_atr_pct: float = 0.0
+    min_hold_bars_before_signal_exit: int = 0
     cooldown_bars_after_exit: int = 10
     cooldown_bars_after_stop: int = 30
     max_entries_per_hour: int = 6
