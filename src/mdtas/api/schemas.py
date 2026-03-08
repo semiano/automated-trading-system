@@ -122,6 +122,7 @@ class AssetControlOut(BaseModel):
     last_evaluated_state: str | None
     last_evaluated_note: str | None
     tuning_params: dict[str, float | int]
+    live_balance: dict[str, float | str | bool] | None = None
 
 
 class AssetControlUpdate(BaseModel):
@@ -137,6 +138,29 @@ class AssetEngineLogOut(BaseModel):
     state: str
     note: str | None
     created_at: datetime
+
+
+class AssetValueBalanceRequest(BaseModel):
+    target_base_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    tolerance_bps: float = Field(default=25.0, ge=0.0)
+
+
+class AssetValueBalanceOut(BaseModel):
+    symbol: str
+    action: str
+    order_side: str | None
+    qty: float
+    raw_price: float | None
+    fill_price: float | None
+    fill_notional_usd: float | None
+    fee_usd: float | None
+    pre_base_qty: float
+    pre_quote_qty: float
+    post_base_qty: float
+    post_quote_qty: float
+    base_value_ratio_before: float | None
+    base_value_ratio_after: float | None
+    note: str
 
 
 class CatchupStatusOut(BaseModel):

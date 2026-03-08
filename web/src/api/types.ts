@@ -96,6 +96,36 @@ export type AssetControl = {
   last_evaluated_state?: string | null;
   last_evaluated_note?: string | null;
   tuning_params: Record<string, number>;
+  live_balance?: {
+    status: string;
+    can_long?: boolean;
+    can_short?: boolean;
+    base_free?: number;
+    quote_free?: number;
+    price?: number;
+    required_notional?: number;
+    required_base_qty?: number;
+    base_value_ratio?: number;
+    note?: string;
+  } | null;
+};
+
+export type AssetValueBalanceResponse = {
+  symbol: string;
+  action: string;
+  order_side?: string | null;
+  qty: number;
+  raw_price?: number | null;
+  fill_price?: number | null;
+  fill_notional_usd?: number | null;
+  fee_usd?: number | null;
+  pre_base_qty: number;
+  pre_quote_qty: number;
+  post_base_qty: number;
+  post_quote_qty: number;
+  base_value_ratio_before?: number | null;
+  base_value_ratio_after?: number | null;
+  note: string;
 };
 
 export type AssetEngineLog = {

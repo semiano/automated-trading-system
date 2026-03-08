@@ -31,11 +31,18 @@ $remoteRoot = "/opt/automated-trading-system"
 $files = @(
     "config.yaml",
     "src/mdtas/config.py",
+    "src/mdtas/trading/execution.py",
     "src/mdtas/trading/runtime.py",
+    "src/mdtas/api/schemas.py",
     "src/mdtas/api/routes_trading.py",
+    "web/src/components/CandleChart.tsx",
+    "web/src/components/IndicatorPanels.tsx",
     "web/src/components/ChartLayout.tsx",
+    "web/src/components/PortfolioPage.tsx",
     "web/src/app.tsx",
-    "web/src/api/types.ts"
+    "web/tsconfig.json",
+    "web/src/api/types.ts",
+    "web/src/api/client.ts"
 )
 
 Write-Host "Uploading iteration hotfix files to $ip ..."
@@ -54,6 +61,9 @@ if ! grep -q '^MDTAS_CONFIG_FILE=' .env.docker; then
 else
   sed -i 's|^MDTAS_CONFIG_FILE=.*|MDTAS_CONFIG_FILE=./config.yaml|' .env.docker
 fi
+
+# Remove stale TypeScript emit artifacts that can shadow .ts sources in Vite.
+rm -f web/src/api/client.js web/src/api/types.js
 
 docker compose --env-file .env.docker up -d --build api trader web
 

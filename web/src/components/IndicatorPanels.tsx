@@ -2,6 +2,29 @@ import React, { useEffect, useRef } from "react";
 import { createChart, HistogramSeries, LineSeries, type Time } from "lightweight-charts";
 import type { IndicatorRow } from "../api/types";
 
+function toEpochSeconds(ts: string): number {
+  const withZone = /Z$|[+-]\d{2}:\d{2}$/.test(ts) ? ts : `${ts}Z`;
+  return Math.floor(new Date(withZone).getTime() / 1000);
+}
+
+function normalizeRows(rows: IndicatorRow[]): IndicatorRow[] {
+  const sorted = [...rows].sort((a, b) => toEpochSeconds(a.ts) - toEpochSeconds(b.ts));
+  const deduped: IndicatorRow[] = [];
+  for (const row of sorted) {
+    if (deduped.length === 0) {
+      deduped.push(row);
+      continue;
+    }
+    const prev = deduped[deduped.length - 1];
+    if (toEpochSeconds(prev.ts) === toEpochSeconds(row.ts)) {
+      deduped[deduped.length - 1] = row;
+    } else {
+      deduped.push(row);
+    }
+  }
+  return deduped;
+}
+
 type Props = {
   rows: IndicatorRow[];
   showVolume: boolean;
@@ -12,6 +35,7 @@ type Props = {
 
 function VolumePanel({ rows }: { rows: IndicatorRow[] }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const normalizedRows = normalizeRows(rows);
   useEffect(() => {
     if (!ref.current) return;
     const chart = createChart(ref.current, {
@@ -27,15 +51,15 @@ function VolumePanel({ rows }: { rows: IndicatorRow[] }) {
       color: "#64748b",
     });
     series.setData(
-      rows.map((r) => ({
-        time: Math.floor(new Date(r.ts).getTime() / 1000) as Time,
+      normalizedRows.map((r) => ({
+        time: toEpochSeconds(r.ts) as Time,
         value: r.volume,
         color: r.close >= r.open ? "#1f8f4c" : "#8f2d2d",
       }))
     );
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [rows]);
+  }, [normalizedRows]);
 
   return (
     <div style={{ borderTop: "1px solid #22262f" }}>
@@ -47,6 +71,7 @@ function VolumePanel({ rows }: { rows: IndicatorRow[] }) {
 
 function Panel({ title, rows, keyName, color }: { title: string; rows: IndicatorRow[]; keyName: keyof IndicatorRow; color: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const normalizedRows = normalizeRows(rows);
   useEffect(() => {
     if (!ref.current) return;
     const chart = createChart(ref.current, {
@@ -58,13 +83,13 @@ function Panel({ title, rows, keyName, color }: { title: string; rows: Indicator
     });
     const series = chart.addSeries(LineSeries, { color, lineWidth: 2 });
     series.setData(
-      rows
+      normalizedRows
         .filter((r) => typeof r[keyName] === "number")
-        .map((r) => ({ time: Math.floor(new Date(r.ts).getTime() / 1000) as Time, value: Number(r[keyName]) }))
+        .map((r) => ({ time: toEpochSeconds(r.ts) as Time, value: Number(r[keyName]) }))
     );
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [rows, keyName, color]);
+  }, [normalizedRows, keyName, color]);
 
   return (
     <div style={{ borderTop: "1px solid #22262f" }}>

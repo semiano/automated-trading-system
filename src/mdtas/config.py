@@ -79,7 +79,7 @@ class ExecutionConstraintsConfig(BaseModel):
     min_notional_usd: float = 0.0
     qty_step: float = 0.0
     price_tick: float | None = None
-    fee_bps: float = 6.0
+    fee_bps: float = 0.0
 
 
 class TradingConfig(BaseModel):
@@ -124,8 +124,8 @@ class TradingConfig(BaseModel):
     soft_portfolio_risk_limit_usd: float = 0.0
     risk_budget_policy: Literal["per_symbol", "portfolio"] = "per_symbol"
     portfolio_soft_risk_limit_usd: float = 0.0
-    fee_bps: float = 6.0
-    slippage_bps: float = 2.0
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
     tuned_params_path: str = "artifacts/xrp_tuned_engine_params_selected.yaml"
     default_params: StrategyParamsConfig = Field(default_factory=StrategyParamsConfig)
     per_asset_params: dict[str, StrategyParamsConfig] = Field(default_factory=dict)

@@ -23,6 +23,16 @@ type Props = {
   assetControl?: AssetControl;
   crosshair: IndicatorRow | null;
   setCrosshair: (row: IndicatorRow | null) => void;
+  chartDataCap?: {
+    capLimit: number;
+    totalRows: number;
+    shownRows: number;
+    omittedRows: number;
+    omittedStartTs: string;
+    omittedEndTs: string;
+    visibleStartTs: string;
+    visibleEndTs: string;
+  } | null;
 };
 
 type EntryConditionState = {
@@ -40,6 +50,7 @@ type BinaryLane = {
   color: string;
   values: number[];
   current: boolean | null;
+  dash?: string;
 };
 
 type BinarySubplotProps = {
@@ -50,16 +61,15 @@ type BinarySubplotProps = {
 
 function BinarySubplot({ title, lanes, sideEnabled }: BinarySubplotProps) {
   const pointCount = lanes[0]?.values.length ?? 0;
-  const laneHeight = 14;
   const chartWidth = Math.max(260, pointCount * 4);
-  const chartHeight = Math.max(1, lanes.length) * laneHeight;
+  const chartHeight = 56;
 
-  const pointsFor = (values: number[], laneIndex: number): string => {
+  const pointsFor = (values: number[]): string => {
     if (values.length === 0) {
       return "";
     }
-    const high = laneIndex * laneHeight + 3;
-    const low = laneIndex * laneHeight + laneHeight - 3;
+    const high = 12;
+    const low = chartHeight - 12;
     return values
       .map((v, i) => {
         const x = values.length === 1 ? 0 : (i * (chartWidth - 1)) / (values.length - 1);
@@ -87,37 +97,30 @@ function BinarySubplot({ title, lanes, sideEnabled }: BinarySubplotProps) {
           {sideEnabled ? "active" : "inactive"}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "70px 1fr 34px", gap: 6, alignItems: "start" }}>
-        <div>
-          {lanes.map((lane) => (
-            <div key={lane.key} style={{ height: laneHeight, fontSize: 10, color: "#9ca3af", lineHeight: `${laneHeight}px` }}>
-              {lane.label}
-            </div>
-          ))}
-        </div>
+      <div style={{ marginBottom: 6 }}>
         <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} style={{ width: "100%", height: chartHeight, background: "#0b111b", borderRadius: 4 }}>
-          {lanes.map((lane, idx) => {
-            const y = idx * laneHeight + laneHeight - 3;
-            return <line key={`${lane.key}-base`} x1={0} y1={y} x2={chartWidth} y2={y} stroke="#1f2a3a" strokeWidth={1} />;
-          })}
-          {lanes.map((lane, idx) => (
+          <line x1={0} y1={12} x2={chartWidth} y2={12} stroke="#1f2a3a" strokeWidth={1} />
+          <line x1={0} y1={chartHeight - 12} x2={chartWidth} y2={chartHeight - 12} stroke="#1f2a3a" strokeWidth={1} />
+          {lanes.map((lane) => (
             <polyline
               key={lane.key}
               fill="none"
               stroke={lane.color}
-              strokeWidth={1.8}
-              points={pointsFor(lane.values, idx)}
+              strokeWidth={lane.key === "all" ? 2.4 : 1.8}
+              strokeDasharray={lane.dash}
+              points={pointsFor(lane.values)}
               opacity={sideEnabled ? 1 : 0.45}
             />
           ))}
         </svg>
-        <div>
-          {lanes.map((lane) => (
-            <div key={`${lane.key}-curr`} style={{ height: laneHeight, fontSize: 10, color: "#cbd5e1", textAlign: "right", lineHeight: `${laneHeight}px` }}>
-              {currentText(lane.current)}
-            </div>
-          ))}
-        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {lanes.map((lane) => (
+          <div key={`${lane.key}-legend`} style={{ fontSize: 10, color: "#cbd5e1", display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ color: lane.color }}>{lane.label}</span>
+            <span>{currentText(lane.current)}</span>
+          </div>
+        ))}
       </div>
       <div style={{ marginTop: 6, fontSize: 10, color: "#93a3b8" }}>`ALL=1` means entry signal conditions were fully met on that bar.</div>
     </div>
@@ -139,7 +142,7 @@ function allTrue(values: Array<boolean | null>): boolean | null {
   return values.every((v) => v === true);
 }
 
-export default function ChartLayout({ rows, gaps, overlays, panels, openPositions, closedTrades, assetControl, crosshair, setCrosshair }: Props) {
+export default function ChartLayout({ rows, gaps, overlays, panels, openPositions, closedTrades, assetControl, crosshair, setCrosshair, chartDataCap }: Props) {
   const profile = useMemo(() => buildVolumeProfile(rows), [rows]);
   const row = crosshair ?? rows[rows.length - 1] ?? null;
   const rowIndex = row ? rows.findIndex((r) => r.ts === row.ts) : -1;
@@ -235,20 +238,20 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
     const toBit = (v: boolean | null): number => (v === true ? 1 : 0);
 
     const longLanes: BinaryLane[] = [
-      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentLong.rsi },
-      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentLong.trend },
-      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentLong.bb },
-      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentLong.momentum },
-      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentLong.volatility },
-      { key: "all", label: "ALL", color: "#22c55e", values: [], current: currentLong.all },
+      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentLong.rsi, dash: "" },
+      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentLong.trend, dash: "6 3" },
+      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentLong.bb, dash: "2 3" },
+      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentLong.momentum, dash: "10 3 2 3" },
+      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentLong.volatility, dash: "1 3" },
+      { key: "all", label: "ALL", color: "#22c55e", values: [], current: currentLong.all, dash: "" },
     ];
     const shortLanes: BinaryLane[] = [
-      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentShort.rsi },
-      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentShort.trend },
-      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentShort.bb },
-      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentShort.momentum },
-      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentShort.volatility },
-      { key: "all", label: "ALL", color: "#ef4444", values: [], current: currentShort.all },
+      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentShort.rsi, dash: "" },
+      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentShort.trend, dash: "6 3" },
+      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentShort.bb, dash: "2 3" },
+      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentShort.momentum, dash: "10 3 2 3" },
+      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentShort.volatility, dash: "1 3" },
+      { key: "all", label: "ALL", color: "#ef4444", values: [], current: currentShort.all, dash: "" },
     ];
 
     for (let i = start; i < rows.length; i += 1) {
@@ -317,6 +320,17 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
           <span style={{ color: "#a855f7" }}>● SC</span>
           <span>Suffix: S=Sim, R=Real</span>
         </div>
+        {chartDataCap ? (
+          <div style={{ margin: "8px 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid #3e4d63", background: "#121b29", color: "#c5d6ee", fontSize: 11 }}>
+            <strong style={{ color: "#dbeafe" }}>Render cap active:</strong> showing most recent {chartDataCap.shownRows.toLocaleString()} of {chartDataCap.totalRows.toLocaleString()} points (limit={chartDataCap.capLimit.toLocaleString()}).
+            <div style={{ marginTop: 4, color: "#9fb3cc" }}>
+              Omitted {chartDataCap.omittedRows.toLocaleString()} points from {chartDataCap.omittedStartTs} to {chartDataCap.omittedEndTs}.
+            </div>
+            <div style={{ color: "#9fb3cc" }}>
+              Visible range: {chartDataCap.visibleStartTs} to {chartDataCap.visibleEndTs}.
+            </div>
+          </div>
+        ) : null}
         <div style={{ margin: "8px 10px", border: "1px solid #2b3442", borderRadius: 8, background: "#121722", padding: "8px 10px" }}>
           <div style={{ fontSize: 11, color: "#93a3b8", marginBottom: 6 }}>
             Engine Inputs @ {row?.ts ?? "n/a"}
@@ -336,7 +350,7 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
             <span>Close {num(close)} / EMA{emaFast ?? "?"} {num(emaFastValue)}</span>
             <span>BB lower {num(bbLower)} / BB upper {num(bbUpper)}</span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <BinarySubplot title="Open Long" lanes={conditionSeries.longLanes} sideEnabled={longEnabled} />
             <BinarySubplot title="Open Short" lanes={conditionSeries.shortLanes} sideEnabled={shortEnabled} />
           </div>

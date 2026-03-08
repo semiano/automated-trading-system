@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings } from "./api/client";
+import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings, valueBalanceAsset } from "./api/client";
 import type { AssetControl, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
@@ -10,6 +10,54 @@ import SymbolTimeframePicker from "./components/SymbolTimeframePicker";
 import { useStore } from "./state/store";
 import { toIsoDate } from "./utils/formatting";
 import { buildIndicatorsArg } from "./utils/indicators";
+
+const CHART_POINT_LIMITS: Record<string, number> = {
+  "1m": 5000,
+  "5m": 8000,
+  "1h": 12000,
+};
+
+function chartPointLimitForTimeframe(tf: string): number {
+  return CHART_POINT_LIMITS[tf] ?? 8000;
+}
+
+type ChartDataCapInfo = {
+  capLimit: number;
+  totalRows: number;
+  shownRows: number;
+  omittedRows: number;
+  omittedStartTs: string;
+  omittedEndTs: string;
+  visibleStartTs: string;
+  visibleEndTs: string;
+};
+
+function parseApiTsMillis(ts: string): number {
+  const withZone = /Z$|[+-]\d{2}:\d{2}$/.test(ts) ? ts : `${ts}Z`;
+  return new Date(withZone).getTime();
+}
+
+function normalizeIndicatorRows(rows: IndicatorRow[]): IndicatorRow[] {
+  const sorted = [...rows]
+    .filter((r) => Number.isFinite(parseApiTsMillis(r.ts)))
+    .sort((a, b) => parseApiTsMillis(a.ts) - parseApiTsMillis(b.ts));
+
+  const deduped: IndicatorRow[] = [];
+  for (const row of sorted) {
+    if (deduped.length === 0) {
+      deduped.push(row);
+      continue;
+    }
+    const prev = deduped[deduped.length - 1];
+    if (parseApiTsMillis(prev.ts) === parseApiTsMillis(row.ts)) {
+      deduped[deduped.length - 1] = row;
+    } else {
+      deduped.push(row);
+    }
+  }
+
+  return deduped;
+}
 
 export default function App() {
   const {
@@ -48,12 +96,61 @@ export default function App() {
   const [catchupError, setCatchupError] = useState<string | null>(null);
   const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
 
+  const { chartRows, chartDataCap } = useMemo((): { chartRows: IndicatorRow[]; chartDataCap: ChartDataCapInfo | null } => {
+    const capLimit = chartPointLimitForTimeframe(timeframe);
+    if (rows.length <= capLimit) {
+      return { chartRows: rows, chartDataCap: null };
+    }
+
+    const startIndex = rows.length - capLimit;
+    const visibleRows = rows.slice(startIndex);
+    const omitted = rows.slice(0, startIndex);
+    const omittedStartTs = omitted[0]?.ts;
+    const omittedEndTs = omitted[omitted.length - 1]?.ts;
+    const visibleStartTs = visibleRows[0]?.ts;
+    const visibleEndTs = visibleRows[visibleRows.length - 1]?.ts;
+
+    if (!omittedStartTs || !omittedEndTs || !visibleStartTs || !visibleEndTs) {
+      return { chartRows: visibleRows, chartDataCap: null };
+    }
+
+    return {
+      chartRows: visibleRows,
+      chartDataCap: {
+        capLimit,
+        totalRows: rows.length,
+        shownRows: visibleRows.length,
+        omittedRows: omitted.length,
+        omittedStartTs,
+        omittedEndTs,
+        visibleStartTs,
+        visibleEndTs,
+      },
+    };
+  }, [rows, timeframe]);
+
+  const chartGaps = useMemo(() => {
+    if (!chartDataCap) {
+      return gaps;
+    }
+    const cutoff = Date.parse(chartDataCap.visibleStartTs);
+    if (Number.isNaN(cutoff)) {
+      return gaps;
+    }
+    return gaps.filter((gap) => {
+      const gapEnd = Date.parse(gap.end_ts);
+      return Number.isNaN(gapEnd) || gapEnd >= cutoff;
+    });
+  }, [gaps, chartDataCap]);
+
   const activeSymbols = useMemo(() => {
     if (assetControls.length > 0) {
       return assetControls.map((row) => row.symbol);
     }
     return symbols;
   }, [assetControls, symbols]);
+
+  const isSelectedSymbolActive = useMemo(() => activeSymbols.includes(symbol), [activeSymbols, symbol]);
 
   const symbolStatus = useMemo<Record<string, "stale" | "ok">>(() => {
     const out: Record<string, "stale" | "ok"> = {};
@@ -216,7 +313,20 @@ export default function App() {
     await refreshAssetControls();
   };
 
+  const rebalanceAssetValue = async (payload: {
+    symbol: string;
+    target_base_ratio?: number;
+    tolerance_bps?: number;
+  }) => {
+    await valueBalanceAsset(payload);
+    await refreshAssetControls();
+  };
+
   useEffect(() => {
+    if (!isSelectedSymbolActive) {
+      return;
+    }
+
     fetchCandles({
       symbol,
       timeframe,
@@ -229,12 +339,12 @@ export default function App() {
         fetchIndicators({ symbol, timeframe, venue, start: timeRange.start, end: timeRange.end, indicators: indicatorsArg })
           .then((indicatorRows) => {
             if (indicatorRows.length) {
-              setRows(indicatorRows);
+              setRows(normalizeIndicatorRows(indicatorRows));
             } else {
-              setRows(candles);
+              setRows(normalizeIndicatorRows(candles));
             }
           })
-          .catch(() => setRows(candles));
+          .catch(() => setRows(normalizeIndicatorRows(candles)));
       })
       .catch(() => setRows([]));
 
@@ -249,7 +359,7 @@ export default function App() {
     fetchClosedTrades({ symbol, venue, timeframe, limit: 1500 })
       .then((payload) => setChartClosedTrades(payload.rows))
       .catch(() => setChartClosedTrades([]));
-  }, [symbol, timeframe, venue, timeRange.start, timeRange.end, indicatorsArg]);
+  }, [symbol, timeframe, venue, timeRange.start, timeRange.end, indicatorsArg, isSelectedSymbolActive]);
 
   return (
     <div>
@@ -301,8 +411,8 @@ export default function App() {
             <label><input type="checkbox" checked={panels.volumeProfile} onChange={() => togglePanel("volumeProfile")} /> Volume Profile</label>
           </div>
           <ChartLayout
-            rows={rows}
-            gaps={gaps}
+            rows={chartRows}
+            gaps={chartGaps}
             overlays={overlays}
             panels={panels}
             openPositions={chartOpenPositions}
@@ -310,6 +420,7 @@ export default function App() {
             assetControl={selectedAssetControl}
             crosshair={crosshair}
             setCrosshair={setCrosshair}
+            chartDataCap={chartDataCap}
           />
         </>
       ) : view === "portfolio" ? (
@@ -322,6 +433,7 @@ export default function App() {
           pnlMode={pnlMode}
           onPnlMode={setPnlMode}
           onSaveAssetControl={saveAssetControl}
+          onValueBalanceAsset={rebalanceAssetValue}
           onSaveRiskPolicy={saveRiskPolicy}
         />
       ) : (

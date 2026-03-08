@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -164,4 +164,24 @@ export async function fetchCatchupStatus(args: {
   const response = await fetch(`${BASE}/ingestion/catchup-status?${qs(args)}`);
   if (!response.ok) throw new Error("Failed to fetch ingestion catchup status");
   return (await response.json()) as CatchupStatusRow[];
+}
+
+export async function valueBalanceAsset(args: {
+  symbol: string;
+  target_base_ratio?: number;
+  tolerance_bps?: number;
+}): Promise<AssetValueBalanceResponse> {
+  const response = await fetch(`${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}/value-balance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_base_ratio: args.target_base_ratio ?? 0.5,
+      tolerance_bps: args.tolerance_bps ?? 25,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to value-balance asset: ${detail}`);
+  }
+  return (await response.json()) as AssetValueBalanceResponse;
 }

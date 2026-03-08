@@ -18,6 +18,11 @@ type Props = {
     trade_side?: "long_only" | "long_short" | "short_only";
     soft_risk_limit_usd?: number;
   }) => Promise<void>;
+  onValueBalanceAsset: (payload: {
+    symbol: string;
+    target_base_ratio?: number;
+    tolerance_bps?: number;
+  }) => Promise<void>;
   onSaveRiskPolicy: (payload: {
     risk_budget_policy?: "per_symbol" | "portfolio";
     portfolio_soft_risk_limit_usd?: number;
@@ -38,13 +43,14 @@ function toPoints(values: number[], width: number, height: number): string {
     .join(" ");
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveRiskPolicy }: Props) {
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onValueBalanceAsset, onSaveRiskPolicy }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
   const [draftPortfolioLimit, setDraftPortfolioLimit] = useState<string>(String(riskPolicy.portfolio_soft_risk_limit_usd));
   const [saving, setSaving] = useState(false);
   const [logSymbol, setLogSymbol] = useState<string | null>(null);
   const [logRows, setLogRows] = useState<AssetEngineLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [rebalancingSymbol, setRebalancingSymbol] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [flashUntil, setFlashUntil] = useState<Record<string, number>>({});
   const prevSignalsRef = useRef<Record<string, { lastRun: string; nextRun: string; risk: number }>>({});
@@ -262,6 +268,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                 <th style={{ textAlign: "left", padding: 8 }}>Last Run</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Next Run</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Tuning Params</th>
+                <th style={{ textAlign: "left", padding: 8 }}>Asset Balance</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Logs</th>
               </tr>
             </thead>
@@ -480,6 +487,73 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   </td>
                   <td style={{ padding: 8, maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {Object.entries(row.tuning_params).map(([k, v]) => `${k}=${v}`).join(", ")}
+                  </td>
+                  <td style={{ padding: 8, minWidth: 290 }}>
+                    {row.execution_mode !== "live" ? (
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <div>
+                          <strong style={{ color: "#9ca3af" }}>SIM mode</strong>
+                          <span style={{ marginLeft: 8, color: "#9ca3af" }}>live balances hidden</span>
+                        </div>
+                        <div style={{ color: "#9ca3af" }}>
+                          Switch execution mode to <strong style={{ color: "#c7ced8" }}>live</strong> to view base/quote balances.
+                        </div>
+                      </div>
+                    ) : row.live_balance ? (
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <div>
+                          <strong
+                            style={{
+                              color:
+                                row.live_balance.status === "ok"
+                                  ? "#85e89d"
+                                  : row.live_balance.status === "imbalanced"
+                                    ? "#f0d28a"
+                                    : "#f2b8b5",
+                            }}
+                          >
+                            {row.live_balance.status}
+                          </strong>
+                          {typeof row.live_balance.base_value_ratio === "number" ? (
+                            <span style={{ marginLeft: 8, color: "#c7ced8" }}>
+                              base ratio={num(row.live_balance.base_value_ratio * 100, 1)}%
+                            </span>
+                          ) : null}
+                        </div>
+                        <div style={{ color: "#c7ced8" }}>
+                          quote={num(row.live_balance.quote_free, 4)} | base={num(row.live_balance.base_free, 6)}
+                        </div>
+                        <div style={{ color: "#9ca3af" }}>{row.live_balance.note ?? "-"}</div>
+                        <button
+                          type="button"
+                          disabled={saving || rebalancingSymbol === row.symbol}
+                          onClick={async () => {
+                            setRebalancingSymbol(row.symbol);
+                            try {
+                              await onValueBalanceAsset({ symbol: row.symbol, target_base_ratio: 0.5, tolerance_bps: 25 });
+                            } finally {
+                              setRebalancingSymbol(null);
+                            }
+                          }}
+                          style={{
+                            width: "fit-content",
+                            padding: "3px 8px",
+                            borderRadius: 4,
+                            border: "1px solid #2d3340",
+                            background: "#2d3340",
+                            color: "inherit",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {rebalancingSymbol === row.symbol ? "Balancing..." : "Value Balance"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <strong style={{ color: "#f0d28a" }}>Live mode</strong>
+                        <span style={{ color: "#9ca3af" }}>Balance snapshot unavailable right now. Try refresh in a few seconds.</span>
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: 8 }}>
                     <button

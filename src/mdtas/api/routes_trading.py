@@ -9,6 +9,8 @@ from mdtas.api.schemas import (
     AssetControlUpdate,
     ClosedTradeOut,
     ClosedTradesResponse,
+    AssetValueBalanceOut,
+    AssetValueBalanceRequest,
     OpenPositionOut,
     RiskPolicyOut,
     RiskPolicyUpdate,
@@ -17,6 +19,7 @@ from mdtas.api.schemas import (
 from mdtas.config import get_config
 from mdtas.db.session import get_session
 from mdtas.db.trading_repo import TradingRepository
+from mdtas.trading.execution import CcxtExecutionAdapter, SymbolExecutionConstraints, round_down_to_step
 from mdtas.trading.runtime import AssetParamResolver
 
 router = APIRouter(tags=["trading"])
@@ -52,6 +55,107 @@ def _validate_risk_policy(value: str | None) -> str | None:
     if value not in {"per_symbol", "portfolio"}:
         raise HTTPException(status_code=422, detail="risk_budget_policy must be one of: per_symbol, portfolio")
     return value
+
+
+def _split_symbol(symbol: str) -> tuple[str, str]:
+    if "/" not in symbol:
+        raise HTTPException(status_code=422, detail=f"Unsupported symbol format: {symbol}")
+    base, quote = symbol.split("/", 1)
+    if not base or not quote:
+        raise HTTPException(status_code=422, detail=f"Unsupported symbol format: {symbol}")
+    return base, quote
+
+
+def _price_from_ticker(ticker: dict) -> float:
+    for key in ("last", "close", "bid", "ask"):
+        value = ticker.get(key)
+        if value is not None:
+            price = float(value)
+            if price > 0:
+                return price
+    raise HTTPException(status_code=503, detail="No usable market price in ticker")
+
+
+def _build_live_adapter(cfg) -> CcxtExecutionAdapter:
+    return CcxtExecutionAdapter(
+        venue=cfg.providers.ccxt.venue,
+        rate_limit=cfg.providers.ccxt.rate_limit,
+        api_key=cfg.providers.ccxt.api_key,
+        api_secret=cfg.providers.ccxt.api_secret,
+        api_password=cfg.providers.ccxt.api_password,
+        sandbox=cfg.providers.ccxt.sandbox,
+        live_trading_enabled=cfg.trading.live_trading_enabled,
+        live_allow_short=cfg.trading.live_allow_short,
+        live_max_order_notional_usd=cfg.trading.live_max_order_notional_usd,
+        live_allowed_symbols=cfg.trading.live_allowed_symbols,
+        live_require_explicit_env_ack=cfg.trading.live_require_explicit_env_ack,
+        live_ack_env_var_name=cfg.trading.live_ack_env_var_name,
+        live_ack_env_var_value=cfg.trading.live_ack_env_var_value,
+    )
+
+
+def _constraints_for_symbol(cfg, symbol: str) -> SymbolExecutionConstraints:
+    c = cfg.trading.per_asset_constraints.get(symbol, cfg.trading.default_constraints)
+    return SymbolExecutionConstraints(
+        min_notional_usd=float(c.min_notional_usd),
+        qty_step=float(c.qty_step),
+        price_tick=float(c.price_tick) if c.price_tick is not None else None,
+        fee_bps=float(c.fee_bps),
+    )
+
+
+def _live_balance_snapshot(*, cfg, adapter: CcxtExecutionAdapter, symbol: str, trade_side: str) -> dict[str, float | str | bool]:
+    base_ccy, quote_ccy = _split_symbol(symbol)
+    balance = adapter.exchange.fetch_balance()
+    ticker = adapter.exchange.fetch_ticker(symbol)
+    px = _price_from_ticker(ticker)
+
+    base_free = float((balance.get(base_ccy) or {}).get("free") or 0.0)
+    quote_free = float((balance.get(quote_ccy) or {}).get("free") or 0.0)
+    base_value = base_free * px
+    quote_value = quote_free
+    total_value = base_value + quote_value
+    base_ratio = (base_value / total_value) if total_value > 0 else None
+
+    constraints = _constraints_for_symbol(cfg, symbol)
+    target_notional = float(cfg.trading.position_size_usd)
+    if cfg.trading.live_max_order_notional_usd > 0:
+        target_notional = min(target_notional, float(cfg.trading.live_max_order_notional_usd))
+    required_notional = max(float(constraints.min_notional_usd), target_notional)
+    required_base_qty = (required_notional / px) if px > 0 else 0.0
+
+    can_long = quote_free >= (required_notional * 1.01)
+    can_short = base_free >= (required_base_qty * 1.001)
+    long_needed = trade_side in {"long_only", "long_short"}
+    short_needed = trade_side in {"short_only", "long_short"}
+
+    if (long_needed and not can_long) or (short_needed and not can_short):
+        status = "insufficient"
+    elif trade_side == "long_short" and base_ratio is not None and abs(base_ratio - 0.5) > 0.15:
+        status = "imbalanced"
+    else:
+        status = "ok"
+
+    note_parts: list[str] = []
+    if long_needed and not can_long:
+        note_parts.append(f"need_quote>={required_notional:.4f}")
+    if short_needed and not can_short:
+        note_parts.append(f"need_base>={required_base_qty:.8f}")
+    if not note_parts and trade_side == "long_short" and base_ratio is not None:
+        note_parts.append(f"base_ratio={base_ratio:.3f}")
+
+    return {
+        "status": status,
+        "can_long": bool(can_long),
+        "can_short": bool(can_short),
+        "base_free": float(base_free),
+        "quote_free": float(quote_free),
+        "price": float(px),
+        "required_notional": float(required_notional),
+        "required_base_qty": float(required_base_qty),
+        "base_value_ratio": float(base_ratio) if base_ratio is not None else 0.0,
+        "note": ", ".join(note_parts) if note_parts else "ok",
+    }
 
 
 @router.get("/positions/open", response_model=list[OpenPositionOut])
@@ -147,6 +251,13 @@ def list_asset_controls(
 ):
     cfg = get_config()
     resolver = AssetParamResolver(cfg)
+    live_adapter: CcxtExecutionAdapter | None = None
+    live_adapter_error: str | None = None
+    if cfg.trading.execution_adapter == "real":
+        try:
+            live_adapter = _build_live_adapter(cfg)
+        except Exception as exc:  # noqa: BLE001
+            live_adapter_error = str(exc)
     items = repo.list_asset_controls(
         symbols=cfg.symbols,
         default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
@@ -163,6 +274,20 @@ def list_asset_controls(
             execution_mode=item.execution_mode,
         )
         params = resolver.for_symbol(item.symbol)
+        live_balance = None
+        if item.execution_mode == "live":
+            if live_adapter is not None:
+                try:
+                    live_balance = _live_balance_snapshot(
+                        cfg=cfg,
+                        adapter=live_adapter,
+                        symbol=item.symbol,
+                        trade_side=item.trade_side,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    live_balance = {"status": "error", "note": str(exc)}
+            elif live_adapter_error is not None:
+                live_balance = {"status": "error", "note": live_adapter_error}
         out.append(
             AssetControlOut(
                 symbol=item.symbol,
@@ -176,6 +301,7 @@ def list_asset_controls(
                 next_run_ts=item.next_run_ts,
                 last_evaluated_state=item.last_evaluated_state,
                 last_evaluated_note=item.last_evaluated_note,
+                live_balance=live_balance,
                 tuning_params={
                     "rsi_length": params.rsi_length,
                     "atr_length": params.atr_length,
@@ -222,6 +348,17 @@ def update_asset_control(
 
     resolver = AssetParamResolver(cfg)
     params = resolver.for_symbol(item.symbol)
+    live_balance = None
+    if item.execution_mode == "live" and cfg.trading.execution_adapter == "real":
+        try:
+            live_balance = _live_balance_snapshot(
+                cfg=cfg,
+                adapter=_build_live_adapter(cfg),
+                symbol=item.symbol,
+                trade_side=item.trade_side,
+            )
+        except Exception as exc:  # noqa: BLE001
+            live_balance = {"status": "error", "note": str(exc)}
     risk = repo.current_open_risk_usd(
         symbol=item.symbol,
         venue=cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock",
@@ -241,6 +378,7 @@ def update_asset_control(
         next_run_ts=item.next_run_ts,
         last_evaluated_state=item.last_evaluated_state,
         last_evaluated_note=item.last_evaluated_note,
+        live_balance=live_balance,
         tuning_params={
             "rsi_length": params.rsi_length,
             "atr_length": params.atr_length,
@@ -254,6 +392,116 @@ def update_asset_control(
             "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
             "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
         },
+    )
+
+
+@router.post("/control-plane/assets/{symbol:path}/value-balance", response_model=AssetValueBalanceOut)
+def value_balance_asset(symbol: str, payload: AssetValueBalanceRequest):
+    cfg = get_config()
+    if symbol not in cfg.symbols:
+        raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
+    if cfg.trading.execution_adapter != "real" or not cfg.trading.live_trading_enabled:
+        raise HTTPException(status_code=409, detail="Value balance is only available for real trading mode")
+
+    adapter = _build_live_adapter(cfg)
+    constraints = _constraints_for_symbol(cfg, symbol)
+    base_ccy, quote_ccy = _split_symbol(symbol)
+
+    balance_before = adapter.exchange.fetch_balance()
+    ticker = adapter.exchange.fetch_ticker(symbol)
+    raw_price = _price_from_ticker(ticker)
+    base_before = float((balance_before.get(base_ccy) or {}).get("free") or 0.0)
+    quote_before = float((balance_before.get(quote_ccy) or {}).get("free") or 0.0)
+    base_value_before = base_before * raw_price
+    total_before = base_value_before + quote_before
+    if total_before <= 0:
+        raise HTTPException(status_code=409, detail="Cannot rebalance with zero combined base/quote value")
+
+    ratio_before = base_value_before / total_before
+    target_ratio = float(payload.target_base_ratio)
+    tolerance = float(payload.tolerance_bps) / 10000.0
+    delta_ratio = target_ratio - ratio_before
+    if abs(delta_ratio) <= tolerance:
+        return AssetValueBalanceOut(
+            symbol=symbol,
+            action="none",
+            order_side=None,
+            qty=0.0,
+            raw_price=float(raw_price),
+            fill_price=None,
+            fill_notional_usd=None,
+            fee_usd=None,
+            pre_base_qty=float(base_before),
+            pre_quote_qty=float(quote_before),
+            post_base_qty=float(base_before),
+            post_quote_qty=float(quote_before),
+            base_value_ratio_before=float(ratio_before),
+            base_value_ratio_after=float(ratio_before),
+            note="already within tolerance",
+        )
+
+    target_base_value = total_before * target_ratio
+    delta_base_value = target_base_value - base_value_before
+
+    max_notional = float(cfg.trading.live_max_order_notional_usd)
+    if max_notional <= 0:
+        max_notional = abs(delta_base_value)
+
+    order_side: str
+    if delta_base_value > 0:
+        spend = min(delta_base_value, quote_before * 0.98, max_notional)
+        qty = round_down_to_step(spend / raw_price, constraints.qty_step)
+        order_side = "buy"
+        trade_side = "long"
+    else:
+        sell_notional = min(abs(delta_base_value), base_before * raw_price * 0.98, max_notional)
+        qty = round_down_to_step(sell_notional / raw_price, constraints.qty_step)
+        order_side = "sell"
+        trade_side = "short"
+
+    if qty <= 0:
+        raise HTTPException(status_code=409, detail="Computed rebalance quantity is zero; increase balances or adjust constraints")
+
+    if trade_side == "long":
+        fill = adapter.submit_entry(
+            symbol=symbol,
+            raw_price=float(raw_price),
+            qty=float(qty),
+            trade_side="long",
+            constraints=constraints,
+        )
+    else:
+        fill = adapter.submit_entry(
+            symbol=symbol,
+            raw_price=float(raw_price),
+            qty=float(qty),
+            trade_side="short",
+            constraints=constraints,
+        )
+
+    balance_after = adapter.exchange.fetch_balance()
+    base_after = float((balance_after.get(base_ccy) or {}).get("free") or 0.0)
+    quote_after = float((balance_after.get(quote_ccy) or {}).get("free") or 0.0)
+    base_value_after = base_after * raw_price
+    total_after = base_value_after + quote_after
+    ratio_after = (base_value_after / total_after) if total_after > 0 else None
+
+    return AssetValueBalanceOut(
+        symbol=symbol,
+        action="executed",
+        order_side=order_side,
+        qty=float(fill.qty),
+        raw_price=float(raw_price),
+        fill_price=float(fill.price),
+        fill_notional_usd=float(fill.notional_usd),
+        fee_usd=float(fill.fee_usd),
+        pre_base_qty=float(base_before),
+        pre_quote_qty=float(quote_before),
+        post_base_qty=float(base_after),
+        post_quote_qty=float(quote_after),
+        base_value_ratio_before=float(ratio_before),
+        base_value_ratio_after=float(ratio_after) if ratio_after is not None else None,
+        note=f"target_ratio={target_ratio:.4f}, tolerance_bps={payload.tolerance_bps:.2f}",
     )
 
 

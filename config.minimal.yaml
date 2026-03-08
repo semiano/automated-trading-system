@@ -52,5 +52,5 @@ trading:
   soft_portfolio_risk_limit_usd: 50.0
   risk_budget_policy: "per_symbol"
   portfolio_soft_risk_limit_usd: 0.0
-  fee_bps: 6.0
-  slippage_bps: 2.0
+  fee_bps: 0.0
+  slippage_bps: 0.0

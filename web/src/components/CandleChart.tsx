@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
   createChart,
   createSeriesMarkers,
+  type IChartApi,
   type ISeriesApi,
   CandlestickSeries,
   LineSeries,
@@ -25,11 +26,19 @@ type Props = {
 };
 
 function toTime(ts: string): Time {
-  return Math.floor(new Date(ts).getTime() / 1000) as Time;
+  return Math.floor(parseApiTs(ts).getTime() / 1000) as Time;
 }
 
 function toEpochSeconds(ts: string): number {
-  return Math.floor(new Date(ts).getTime() / 1000);
+  return Math.floor(parseApiTs(ts).getTime() / 1000);
+}
+
+function parseApiTs(ts: string): Date {
+  // API candles are stored as UTC; if tz is omitted, force UTC interpretation.
+  if (/Z$|[+-]\d{2}:\d{2}$/.test(ts)) {
+    return new Date(ts);
+  }
+  return new Date(`${ts}Z`);
 }
 
 function inferStepSeconds(rows: IndicatorRow[]): number {
@@ -71,6 +80,35 @@ function withWhitespaceGaps(rows: IndicatorRow[]): Array<{ time: Time; open?: nu
 
 export default function CandleChart({ rows, overlays, tradeMarkers, onCrosshair }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const bbLowerRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbMidRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbUpperRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema20Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema50Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema200Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const markersApiRef = useRef<{ setMarkers: (markers: SeriesMarker<Time>[]) => void } | null>(null);
+  const rowByTimeRef = useRef<Map<number, IndicatorRow>>(new Map());
+  const didFitOnceRef = useRef(false);
+
+  const normalizedRows = useMemo(() => {
+    const sorted = [...rows].sort((a, b) => toEpochSeconds(a.ts) - toEpochSeconds(b.ts));
+    const deduped: IndicatorRow[] = [];
+    for (const row of sorted) {
+      if (deduped.length === 0) {
+        deduped.push(row);
+        continue;
+      }
+      const prev = deduped[deduped.length - 1];
+      if (toEpochSeconds(prev.ts) === toEpochSeconds(row.ts)) {
+        deduped[deduped.length - 1] = row;
+      } else {
+        deduped.push(row);
+      }
+    }
+    return deduped;
+  }, [rows]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -97,8 +135,79 @@ export default function CandleChart({ rows, overlays, tradeMarkers, onCrosshair 
     const ema50 = chart.addSeries(LineSeries, { color: "#eab308", lineWidth: 1 });
     const ema200 = chart.addSeries(LineSeries, { color: "#a855f7", lineWidth: 1 });
 
-    candleSeries.setData(withWhitespaceGaps(rows));
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    bbLowerRef.current = bbLower;
+    bbMidRef.current = bbMid;
+    bbUpperRef.current = bbUpper;
+    ema20Ref.current = ema20;
+    ema50Ref.current = ema50;
+    ema200Ref.current = ema200;
+    markersApiRef.current = createSeriesMarkers(candleSeries, []);
 
+    chart.subscribeCrosshairMove((param) => {
+      if (!param.time) {
+        onCrosshair(null);
+        return;
+      }
+      onCrosshair(rowByTimeRef.current.get(Number(param.time)) ?? null);
+    });
+
+    const onResize = () => chart.applyOptions({ width: ref.current?.clientWidth ?? 800, height: 520 });
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      bbLowerRef.current = null;
+      bbMidRef.current = null;
+      bbUpperRef.current = null;
+      ema20Ref.current = null;
+      ema50Ref.current = null;
+      ema200Ref.current = null;
+      markersApiRef.current = null;
+      didFitOnceRef.current = false;
+    };
+  }, [onCrosshair]);
+
+  useEffect(() => {
+    rowByTimeRef.current = new Map(normalizedRows.map((r) => [toEpochSeconds(r.ts), r]));
+
+    const candleSeries = candleSeriesRef.current;
+    if (!candleSeries) return;
+    candleSeries.setData(withWhitespaceGaps(normalizedRows));
+
+    if (!didFitOnceRef.current && normalizedRows.length > 0) {
+      chartRef.current?.timeScale().fitContent();
+      didFitOnceRef.current = true;
+    }
+  }, [normalizedRows]);
+
+  useEffect(() => {
+    const setLine = (series: ISeriesApi<"Line"> | null, key: keyof IndicatorRow, enabled: boolean) => {
+      if (!series) return;
+      if (!enabled) {
+        series.setData([]);
+        return;
+      }
+      series.setData(
+        normalizedRows
+          .filter((r) => typeof r[key] === "number")
+          .map((r) => ({ time: toTime(r.ts), value: Number(r[key]) }))
+      );
+    };
+
+    setLine(bbLowerRef.current, "bb_lower", overlays.bbands);
+    setLine(bbMidRef.current, "bb_mid", overlays.bbands);
+    setLine(bbUpperRef.current, "bb_upper", overlays.bbands);
+    setLine(ema20Ref.current, "ema20", overlays.ema20);
+    setLine(ema50Ref.current, "ema50", overlays.ema50);
+    setLine(ema200Ref.current, "ema200", overlays.ema200);
+  }, [normalizedRows, overlays]);
+
+  useEffect(() => {
     const markers = tradeMarkers
       .map((m) => {
         const modeTag = m.mode === "sim" ? "S" : "R";
@@ -139,46 +248,8 @@ export default function CandleChart({ rows, overlays, tradeMarkers, onCrosshair 
       })
       .sort((a, b) => Number(a.time) - Number(b.time)) as SeriesMarker<Time>[];
 
-    createSeriesMarkers(candleSeries, markers);
-
-    const setLine = (series: ISeriesApi<"Line">, key: keyof IndicatorRow, enabled: boolean) => {
-      if (!enabled) {
-        series.setData([]);
-        return;
-      }
-      series.setData(
-        rows
-          .filter((r) => typeof r[key] === "number")
-          .map((r) => ({ time: toTime(r.ts), value: Number(r[key]) }))
-      );
-    };
-
-    setLine(bbLower, "bb_lower", overlays.bbands);
-    setLine(bbMid, "bb_mid", overlays.bbands);
-    setLine(bbUpper, "bb_upper", overlays.bbands);
-    setLine(ema20, "ema20", overlays.ema20);
-    setLine(ema50, "ema50", overlays.ema50);
-    setLine(ema200, "ema200", overlays.ema200);
-
-    chart.timeScale().fitContent();
-
-    chart.subscribeCrosshairMove((param) => {
-      if (!param.time) {
-        onCrosshair(null);
-        return;
-      }
-      const row = rows.find((r) => toTime(r.ts) === param.time);
-      onCrosshair(row ?? null);
-    });
-
-    const onResize = () => chart.applyOptions({ width: ref.current?.clientWidth ?? 800, height: 520 });
-    onResize();
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      chart.remove();
-    };
-  }, [rows, overlays, tradeMarkers, onCrosshair]);
+    markersApiRef.current?.setMarkers(markers);
+  }, [tradeMarkers]);
 
   return <div ref={ref} style={{ width: "100%", height: 520 }} />;
 }

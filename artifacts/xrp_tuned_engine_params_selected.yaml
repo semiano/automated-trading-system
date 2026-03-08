@@ -1,28 +1,44 @@
-generated_at_utc: '2026-03-05T04:38:00+00:00'
-symbol: XRP/USDT
+generated_at_utc: '2026-03-07T19:36:29.918614+00:00'
+symbol: XRP/USD
 venue: coinbase
 timeframe: 1m
-selection_basis: latest_engine_v2_tuning_report_best
-source_summary: artifacts/xrp_engine_v2_tuning_report.json
+selection_basis: timeboxed_20m_activity_adjusted_best
+source_summary: artifacts\xrp_timeboxed_20m_tuning_report.json
 cost_model:
-  fee_bps: 6.0
-  slippage_bps: 2.0
+  fee_bps: 0.0
+  slippage_bps: 0.0
 xrp_strategy_params:
-  rsi_length: 19
-  atr_length: 10
-  ema_fast: 7
-  ema_slow: 50
-  rsi_entry: 34.0
-  rsi_exit: 64.0
-  stop_atr: 2.3
-  take_profit_atr: 1.4
-  max_hold_bars: 60
+  rsi_length: 14
+  atr_length: 15
+  ema_fast: 9
+  ema_slow: 34
+  rsi_entry: 40.0
+  rsi_exit: 67.0
+  stop_atr: 1.5
+  take_profit_atr: 1.2
+  max_hold_bars: 120
+  chop_bb_width_min: 0.006
+  cooldown_bars_after_exit: 15
+  cooldown_bars_after_stop: 10
+  max_entries_per_hour: 4
+  max_entries_per_day: 50
+  use_regime_filter: false
+  bb_entry_mode: 'off'
+  bb_range_threshold_pct: 0.75
+  momentum_swing_enabled: false
+  momentum_pivot_left_bars: 2
+  momentum_pivot_right_bars: 0
+  momentum_lookback_bars: 10
+  momentum_roc_length: 1
+  momentum_min_roc: 0.0003
 best_observed_metrics:
-  robust_score: 24.564296805511042
+  robust_score: 23.681951764971096
+  activity_adjusted_score: 12.920059207009047
   full:
-    score: -2.0011427309839234
-    total_return: -0.0006087279298645498
-    max_drawdown: -0.019006166537264946
-    sharpe: -0.2949499728807859
-    trades: 7
-    win_rate: 0.7142857142857143
+    score: 21.803052581346947
+    total_return: 0.0017458787346242843
+    max_drawdown: -0.001843146627402259
+    sharpe: 10.959526752764326
+    trades: 6
+    win_rate: 0.3333333333333333
+  full_trades_per_day: 4.873096446700508

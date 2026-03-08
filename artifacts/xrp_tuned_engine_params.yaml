@@ -1,45 +1,65 @@
-generated_at_utc: '2026-03-05T03:21:33.854273+00:00'
-symbol: XRP/USDT
+generated_at_utc: '2026-03-07T19:36:29.918614+00:00'
+symbol: XRP/USD
 venue: coinbase
 timeframe: 1m
-lookback_days: 30
+lookback_days: 45
 optimizer:
   seed: 42
-  coarse_iterations: 220
-  refine_iterations: 180
-  objective: robust_score = 0.65*train_score + 0.35*test_score + 10*min(train_win_rate,test_win_rate)
+  timebox_minutes: 20
+  batch_size: 240
+  iterations_evaluated: 960
+  batches: 4
+  objective: activity_adjusted_score with positive-return and min-trade-frequency
+    bias
 cost_model:
-  fee_bps: 6.0
-  slippage_bps: 2.0
+  fee_bps: 0.0
+  slippage_bps: 0.0
 xrp_strategy_params:
-  rsi_length: 19
+  rsi_length: 14
   atr_length: 15
-  ema_fast: 7
-  ema_slow: 33
-  rsi_entry: 32.0
+  ema_fast: 9
+  ema_slow: 34
+  rsi_entry: 40.0
   rsi_exit: 67.0
-  stop_atr: 2.3
-  take_profit_atr: 1.4
-  max_hold_bars: 100
+  stop_atr: 1.5
+  take_profit_atr: 1.2
+  max_hold_bars: 120
+  chop_bb_width_min: 0.006
+  cooldown_bars_after_exit: 15
+  cooldown_bars_after_stop: 10
+  max_entries_per_hour: 4
+  max_entries_per_day: 50
+  use_regime_filter: false
+  bb_entry_mode: 'off'
+  bb_range_threshold_pct: 0.75
+  momentum_swing_enabled: false
+  momentum_pivot_left_bars: 2
+  momentum_pivot_right_bars: 0
+  momentum_lookback_bars: 10
+  momentum_roc_length: 1
+  momentum_min_roc: 0.0003
 performance:
   train:
-    score: 36.61953776360602
-    total_return: 0.010604904718375163
-    max_drawdown: -0.0016956890367183508
-    sharpe: 17.8603943169858
-    trades: 2
-    win_rate: 1.0
+    score: 26.976300148504084
+    total_return: 0.0015736820923784034
+    max_drawdown: -0.0008766803039159665
+    sharpe: 13.4807663787506
+    trades: 3
+    win_rate: 0.3333333333333333
   test:
-    score: 68.62347581641137
-    total_return: 0.005230479173765179
-    max_drawdown: 0.0
-    sharpe: 34.08021394951743
-    trades: 2
-    win_rate: 1.0
+    score: 8.040066671743165
+    total_return: 0.00017192608524396746
+    max_drawdown: -0.0014692922022540023
+    sharpe: 4.100515797677004
+    trades: 3
+    win_rate: 0.3333333333333333
   full:
-    score: 42.88054908004981
-    total_return: 0.01589085262540957
-    max_drawdown: -0.0016956890367183508
-    sharpe: 20.756602579855976
-    trades: 4
-    win_rate: 1.0
+    score: 21.803052581346947
+    total_return: 0.0017458787346242843
+    max_drawdown: -0.001843146627402259
+    sharpe: 10.959526752764326
+    trades: 6
+    win_rate: 0.3333333333333333
+  full_trades_per_day: 4.873096446700508
+  robust_score: 23.681951764971096
+  activity_adjusted_score: 12.920059207009047

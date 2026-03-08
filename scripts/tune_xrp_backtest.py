@@ -276,8 +276,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--coarse-iters", type=int, default=220)
     parser.add_argument("--refine-iters", type=int, default=180)
-    parser.add_argument("--fee-bps", type=float, default=6.0)
-    parser.add_argument("--slippage-bps", type=float, default=2.0)
+    parser.add_argument("--fee-bps", type=float, default=0.0)
+    parser.add_argument("--slippage-bps", type=float, default=0.0)
     args = parser.parse_args()
 
     db_path = Path(args.db_path)

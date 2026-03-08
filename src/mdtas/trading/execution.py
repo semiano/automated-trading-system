@@ -165,6 +165,38 @@ class CcxtExecutionAdapter:
         self.live_allowed_symbols = set(live_allowed_symbols)
         self.venue = venue
 
+    @staticmethod
+    def _split_symbol(symbol: str) -> tuple[str, str]:
+        if "/" not in symbol:
+            raise ValueError(f"Unsupported symbol format: {symbol}")
+        base, quote = symbol.split("/", 1)
+        if not base or not quote:
+            raise ValueError(f"Unsupported symbol format: {symbol}")
+        return base, quote
+
+    def _spot_balance_guard(self, *, symbol: str, side: TradeActionSide, raw_price: float, qty: float) -> None:
+        if not hasattr(self.exchange, "fetch_balance"):
+            return
+        base_ccy, quote_ccy = self._split_symbol(symbol)
+        balance = self.exchange.fetch_balance()
+        base_free = float((balance.get(base_ccy) or {}).get("free") or 0.0)
+        quote_free = float((balance.get(quote_ccy) or {}).get("free") or 0.0)
+
+        if side == "buy":
+            required_quote = float(raw_price) * float(qty) * 1.01
+            if quote_free < required_quote:
+                raise ValueError(
+                    f"Insufficient quote balance for buy on {symbol}: free_{quote_ccy}={quote_free:.8f}, "
+                    f"required_{quote_ccy}>={required_quote:.8f}"
+                )
+        else:
+            required_base = float(qty) * 1.001
+            if base_free < required_base:
+                raise ValueError(
+                    f"Insufficient base balance for sell on {symbol}: free_{base_ccy}={base_free:.8f}, "
+                    f"required_{base_ccy}>={required_base:.8f}"
+                )
+
     def _validate_request(self, *, symbol: str, raw_price: float, qty: float, trade_side: PositionSide) -> None:
         if qty <= 0:
             raise ValueError("Order quantity must be > 0")
@@ -179,6 +211,9 @@ class CcxtExecutionAdapter:
             )
         if trade_side == "short" and not self.live_allow_short:
             raise ValueError("Short trading disabled by live_allow_short=false")
+
+        order_side: TradeActionSide = "buy" if trade_side == "long" else "sell"
+        self._spot_balance_guard(symbol=symbol, side=order_side, raw_price=raw_price, qty=qty)
 
     def _submit_market_order(self, *, symbol: str, side: TradeActionSide, qty: float, raw_price: float) -> dict:
         create_kwargs: dict[str, object] = {
