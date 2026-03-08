@@ -106,6 +106,8 @@ class TradingConfig(BaseModel):
     momentum_roc_length: int = 5
     momentum_min_roc: float = 0.002
     min_entry_atr_pct: float = 0.0
+    dynamic_volatility_bb_override_enabled: bool = False
+    dynamic_volatility_extreme_bb_width_ratio: float = 1.2
     min_hold_bars_before_signal_exit: int = 0
     cooldown_bars_after_exit: int = 10
     cooldown_bars_after_stop: int = 30

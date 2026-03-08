@@ -36,6 +36,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       MDTAS_CONFIG_PATH: /app/config.yaml
       MDTAS_LOG_LEVEL: ${MDTAS_LOG_LEVEL:-INFO}
+      MDTAS_API_READ_TOKEN: ${MDTAS_API_READ_TOKEN:-}
+      MDTAS_API_WRITE_TOKEN: ${MDTAS_API_WRITE_TOKEN:-}
       PYTHONUNBUFFERED: "1"
     volumes:
       - ${MDTAS_CONFIG_FILE:-./config.yaml}:/app/config.yaml:ro

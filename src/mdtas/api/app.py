@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from mdtas.api.auth import require_read_access
 from mdtas.api.routes_candles import router as candles_router
 from mdtas.api.routes_features import router as features_router
 from mdtas.api.routes_gaps import router as gaps_router
@@ -33,9 +34,9 @@ def startup() -> None:
 
 
 app.include_router(health_router, prefix="/api/v1")
-app.include_router(candles_router, prefix="/api/v1")
-app.include_router(indicators_router, prefix="/api/v1")
+app.include_router(candles_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
+app.include_router(indicators_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
 app.include_router(features_router, prefix="/api/v1")
-app.include_router(gaps_router, prefix="/api/v1")
-app.include_router(ingestion_status_router, prefix="/api/v1")
+app.include_router(gaps_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
+app.include_router(ingestion_status_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
 app.include_router(trading_router, prefix="/api/v1")

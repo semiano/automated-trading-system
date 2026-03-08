@@ -523,7 +523,8 @@ class TradingRuntime:
         indicators = ["rsi", "atr", f"ema{params.ema_fast}", f"ema{params.ema_slow}"]
         indicator_params = params.indicator_params()
         bb_entry_mode = str(self.cfg.trading.bb_entry_mode)
-        if bb_entry_mode != "off":
+        use_bbands = bb_entry_mode != "off" or bool(self.cfg.trading.dynamic_volatility_bb_override_enabled)
+        if use_bbands:
             indicators.append("bbands")
             indicator_params["bollinger"] = {
                 "length": int(self.cfg.indicators.bollinger.length),
@@ -1049,9 +1050,32 @@ class TradingRuntime:
 
         min_entry_atr_pct = max(0.0, float(self.cfg.trading.min_entry_atr_pct))
         atr_pct = (atr / close) * 100.0 if close > 0 else float("nan")
-        pass_volatility = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+        pass_volatility_base = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+
+        pass_volatility_dyn = False
+        dyn_note = ""
+        dyn_enabled = bool(self.cfg.trading.dynamic_volatility_bb_override_enabled)
+        if dyn_enabled:
+            if pd.isna(prev.get("bb_lower")) or pd.isna(prev.get("bb_upper")):
+                dyn_note = ", dyn_vol=missing_bbands(False)"
+            else:
+                bb_lower = float(prev["bb_lower"])
+                bb_upper = float(prev["bb_upper"])
+                bb_range = bb_upper - bb_lower
+                dyn_threshold = max(0.0, float(self.cfg.trading.dynamic_volatility_extreme_bb_width_ratio))
+                if bb_range <= 0:
+                    dyn_note = f", dyn_vol=invalid_bb_range={bb_range:.6f}(False)"
+                else:
+                    outside_ratio = (bb_lower - close) / bb_range
+                    pass_volatility_dyn = outside_ratio >= dyn_threshold
+                    dyn_note = (
+                        f", dyn_vol_long_outside_ratio={outside_ratio:.3f}"
+                        f">=dyn_thr={dyn_threshold:.3f}({pass_volatility_dyn})"
+                    )
+
+        pass_volatility = bool(pass_volatility_base or pass_volatility_dyn)
         volatility_note = (
-            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility})"
+            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility_base}){dyn_note}"
             if min_entry_atr_pct > 0
             else ", atr_pct_gate=off"
         )
@@ -1121,9 +1145,32 @@ class TradingRuntime:
 
         min_entry_atr_pct = max(0.0, float(self.cfg.trading.min_entry_atr_pct))
         atr_pct = (atr / close) * 100.0 if close > 0 else float("nan")
-        pass_volatility = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+        pass_volatility_base = True if min_entry_atr_pct <= 0 else (pd.notna(atr_pct) and atr_pct >= min_entry_atr_pct)
+
+        pass_volatility_dyn = False
+        dyn_note = ""
+        dyn_enabled = bool(self.cfg.trading.dynamic_volatility_bb_override_enabled)
+        if dyn_enabled:
+            if pd.isna(prev.get("bb_lower")) or pd.isna(prev.get("bb_upper")):
+                dyn_note = ", dyn_vol=missing_bbands(False)"
+            else:
+                bb_lower = float(prev["bb_lower"])
+                bb_upper = float(prev["bb_upper"])
+                bb_range = bb_upper - bb_lower
+                dyn_threshold = max(0.0, float(self.cfg.trading.dynamic_volatility_extreme_bb_width_ratio))
+                if bb_range <= 0:
+                    dyn_note = f", dyn_vol=invalid_bb_range={bb_range:.6f}(False)"
+                else:
+                    outside_ratio = (close - bb_upper) / bb_range
+                    pass_volatility_dyn = outside_ratio >= dyn_threshold
+                    dyn_note = (
+                        f", dyn_vol_short_outside_ratio={outside_ratio:.3f}"
+                        f">=dyn_thr={dyn_threshold:.3f}({pass_volatility_dyn})"
+                    )
+
+        pass_volatility = bool(pass_volatility_base or pass_volatility_dyn)
         volatility_note = (
-            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility})"
+            f", atr_pct={atr_pct:.4f}%>=min_entry_atr_pct={min_entry_atr_pct:.4f}%({pass_volatility_base}){dyn_note}"
             if min_entry_atr_pct > 0
             else ", atr_pct_gate=off"
         )

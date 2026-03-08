@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from mdtas.api.auth import require_read_access, require_write_access
 from mdtas.api.schemas import BackfillRequest, BackfillResult
 from mdtas.config import get_config
 from mdtas.db.repo import CandleRepository
@@ -26,7 +27,11 @@ def get_repo(session: Session = Depends(get_session)):
 
 
 @router.post("/backfill", response_model=list[BackfillResult])
-def backfill(req: BackfillRequest, repo: CandleRepository = Depends(get_repo)):
+def backfill(
+    req: BackfillRequest,
+    _auth: None = Depends(require_write_access),
+    repo: CandleRepository = Depends(get_repo),
+):
     cfg = get_config()
     provider = build_provider(cfg)
     venue = req.venue or cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock"
@@ -62,6 +67,7 @@ def features(
     end: datetime | None = None,
     indicators: str = "bbands,rsi,atr,ema20,ema50,ema200,volume_sma,vwap",
     format: str = Query(default="json"),
+    _auth: None = Depends(require_read_access),
     repo: CandleRepository = Depends(get_repo),
 ):
     cfg = get_config()

@@ -317,3 +317,59 @@ def test_min_entry_atr_pct_allows_high_volatility_entries():
 
     assert long_ok is True
     assert short_ok is True
+
+
+def test_dynamic_volatility_override_allows_low_atr_long_when_below_band_is_extreme():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "off"
+    cfg.trading.momentum_swing_enabled = False
+    cfg.trading.min_entry_atr_pct = 0.12
+    cfg.trading.dynamic_volatility_bb_override_enabled = True
+    cfg.trading.dynamic_volatility_extreme_bb_width_ratio = 1.2
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    row = pd.Series(
+        {
+            "rsi": params.rsi_entry - 2.0,
+            "atr": 0.001,
+            "close": 1.17,
+            f"ema{params.ema_fast}": 1.10,
+            "bb_lower": 1.30,
+            "bb_upper": 1.40,
+        }
+    )
+
+    long_ok, note = runtime._entry_diagnostics_long(row, params, "off")
+
+    assert long_ok is True
+    assert "dyn_vol_long_outside_ratio" in note
+
+
+def test_dynamic_volatility_override_allows_low_atr_short_when_above_band_is_extreme():
+    cfg = AppConfig()
+    cfg.trading.bb_entry_mode = "off"
+    cfg.trading.momentum_swing_enabled = False
+    cfg.trading.min_entry_atr_pct = 0.12
+    cfg.trading.dynamic_volatility_bb_override_enabled = True
+    cfg.trading.dynamic_volatility_extreme_bb_width_ratio = 1.2
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=_DummyTradingRepo())
+    params = runtime.params_resolver.for_symbol("XRP/USDT")
+
+    row = pd.Series(
+        {
+            "rsi": params.rsi_exit + 2.0,
+            "atr": 0.001,
+            "close": 1.53,
+            f"ema{params.ema_fast}": 1.60,
+            "bb_lower": 1.30,
+            "bb_upper": 1.40,
+        }
+    )
+
+    short_ok, note = runtime._entry_diagnostics_short(row, params, "off")
+
+    assert short_ok is True
+    assert "dyn_vol_short_outside_ratio" in note

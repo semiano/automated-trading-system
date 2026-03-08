@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $root ".env"
+$envDockerPath = Join-Path $root ".env.docker"
 $plink = "C:\Program Files\PuTTY\plink.exe"
 $pscp = "C:\Program Files\PuTTY\pscp.exe"
 
@@ -17,8 +18,49 @@ function Get-EnvValue {
     return $line.Split("=", 2)[1]
 }
 
+function Get-OptionalEnvValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+    $line = Get-Content $Path | Where-Object { $_ -match "^$([regex]::Escape($Key))=" } | Select-Object -First 1
+    if (-not $line) {
+        return $null
+    }
+    return $line.Split("=", 2)[1]
+}
+
+function Set-EnvValueInFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $lines = @()
+    if (Test-Path $Path) {
+        $lines = Get-Content $Path
+    }
+    $updated = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^$([regex]::Escape($Key))=") {
+            $lines[$i] = "${Key}=${Value}"
+            $updated = $true
+            break
+        }
+    }
+    if (-not $updated) {
+        $lines += "${Key}=${Value}"
+    }
+    Set-Content -Path $Path -Value ($lines -join "`n") -NoNewline
+}
+
 if (-not (Test-Path $plink)) { throw "plink not found at $plink" }
 if (-not (Test-Path $pscp)) { throw "pscp not found at $pscp" }
+if (-not (Test-Path $envDockerPath)) { throw "Missing .env.docker at $envDockerPath" }
 
 $droplets = doctl compute droplet list --output json | ConvertFrom-Json
 $target = $droplets | Where-Object { $_.name -eq "ubuntu-s-1vcpu-1gb-nyc3-01" } | Select-Object -First 1
@@ -29,10 +71,14 @@ $pw = Get-EnvValue -Path $envPath -Key "DIGITAL_OCEAN_VPS_ROOT_PW"
 
 $remoteRoot = "/opt/automated-trading-system"
 $files = @(
+    "docker-compose.yml",
     "config.yaml",
     "src/mdtas/config.py",
     "src/mdtas/trading/execution.py",
     "src/mdtas/trading/runtime.py",
+    "src/mdtas/api/auth.py",
+    "src/mdtas/api/app.py",
+    "src/mdtas/api/routes_features.py",
     "src/mdtas/api/schemas.py",
     "src/mdtas/api/routes_trading.py",
     "web/src/components/CandleChart.tsx",
@@ -44,6 +90,18 @@ $files = @(
     "web/src/api/types.ts",
     "web/src/api/client.ts"
 )
+
+$readToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_READ_TOKEN"
+$writeToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_WRITE_TOKEN"
+if ($readToken) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_READ_TOKEN" -Value $readToken
+}
+if ($writeToken) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_WRITE_TOKEN" -Value $writeToken
+}
+
+Write-Host "Uploading .env.docker to $ip ..."
+& $pscp -batch -pw $pw $envDockerPath ("root@${ip}:${remoteRoot}/.env.docker")
 
 Write-Host "Uploading iteration hotfix files to $ip ..."
 foreach ($f in $files) {

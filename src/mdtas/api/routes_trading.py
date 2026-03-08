@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from mdtas.api.auth import require_read_access, require_write_access
 from mdtas.api.schemas import (
     AssetEngineLogOut,
     AssetControlOut,
@@ -164,6 +165,7 @@ def open_positions(
     venue: str | None = None,
     timeframe: str | None = None,
     execution_mode: str | None = None,
+    _auth: None = Depends(require_read_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     mode = _validate_mode(execution_mode)
@@ -210,6 +212,7 @@ def closed_trades(
     timeframe: str | None = None,
     execution_mode: str | None = None,
     limit: int = Query(default=500, ge=1, le=5000),
+    _auth: None = Depends(require_read_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     mode = _validate_mode(execution_mode)
@@ -247,6 +250,7 @@ def closed_trades(
 
 @router.get("/control-plane/assets", response_model=list[AssetControlOut])
 def list_asset_controls(
+    _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
@@ -324,6 +328,7 @@ def list_asset_controls(
 def update_asset_control(
     symbol: str,
     payload: AssetControlUpdate,
+    _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
@@ -396,7 +401,11 @@ def update_asset_control(
 
 
 @router.post("/control-plane/assets/{symbol:path}/value-balance", response_model=AssetValueBalanceOut)
-def value_balance_asset(symbol: str, payload: AssetValueBalanceRequest):
+def value_balance_asset(
+    symbol: str,
+    payload: AssetValueBalanceRequest,
+    _auth: None = Depends(require_write_access),
+):
     cfg = get_config()
     if symbol not in cfg.symbols:
         raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
@@ -509,6 +518,7 @@ def value_balance_asset(symbol: str, payload: AssetValueBalanceRequest):
 def list_asset_logs(
     symbol: str,
     limit: int = Query(default=100, ge=1, le=2000),
+    _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     rows = repo.list_asset_logs(symbol=symbol, limit=limit)
@@ -525,7 +535,7 @@ def list_asset_logs(
 
 
 @router.get("/control-plane/risk-policy", response_model=RiskPolicyOut)
-def get_risk_policy_settings():
+def get_risk_policy_settings(_auth: None = Depends(require_write_access)):
     cfg = get_config()
     return RiskPolicyOut(
         risk_budget_policy=cfg.trading.risk_budget_policy,
@@ -534,7 +544,7 @@ def get_risk_policy_settings():
 
 
 @router.put("/control-plane/risk-policy", response_model=RiskPolicyOut)
-def update_risk_policy_settings(payload: RiskPolicyUpdate):
+def update_risk_policy_settings(payload: RiskPolicyUpdate, _auth: None = Depends(require_write_access)):
     cfg = get_config()
     policy = _validate_risk_policy(payload.risk_budget_policy)
     if policy is not None:
@@ -548,7 +558,10 @@ def update_risk_policy_settings(payload: RiskPolicyUpdate):
 
 
 @router.get("/control-plane/trader/reload-status", response_model=TraderConfigReloadStatusOut)
-def get_trader_reload_status(repo: TradingRepository = Depends(get_repo)):
+def get_trader_reload_status(
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
     last_event = repo.latest_engine_event(
         symbol=SYSTEM_TRADER_SYMBOL,
         states=("config_reloaded", "config_reload_failed"),

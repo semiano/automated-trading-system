@@ -50,6 +50,10 @@ Use these first in day-to-day workflow.
   - Compares strategy scenarios over VPS data.
   - Use for structured scenario testing before/after parameter changes.
 
+- `report_vps_market_data_via_api.py`
+  - Pulls candles/indicators/gaps from VPS over authenticated HTTP API (no shell hop).
+  - Use for GHCP analysis sessions that only need read-only market data.
+
 ## Local Runner Scripts
 
 - `run_api_local.sh`, `run_ingestion_local.sh`, `run_trader_local.sh`, `run_web_local.sh`
@@ -126,4 +130,5 @@ Current deprecated shim:
 
 - Prefer `deploy_vps_engine_iteration_hotfix.ps1` for normal hotfix deployments.
 - Prefer `check_vps_ingestion_status.ps1` and escalate to `check_vps_ingestion_ws_debug.ps1` when needed.
+- For API-token workflow details, see `docs/vps_api_access.md`.
 - Keep this file updated when scripts are added/removed so operators have one reliable index.
