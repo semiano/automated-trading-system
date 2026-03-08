@@ -105,6 +105,8 @@ services:
       dockerfile: docker/web.Dockerfile
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      VITE_API_READ_TOKEN: ${VITE_API_READ_TOKEN:-}
+      VITE_API_WRITE_TOKEN: ${VITE_API_WRITE_TOKEN:-}
       NODE_OPTIONS: ${WEB_NODE_OPTIONS:---max-old-space-size=192}
     ports:
       - "${WEB_PORT:-5173}:5173"

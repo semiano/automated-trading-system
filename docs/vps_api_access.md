@@ -29,11 +29,18 @@ Set on VPS for the API container:
 - `MDTAS_API_READ_TOKEN`
 - `MDTAS_API_WRITE_TOKEN`
 
+Set on VPS for the web container (frontend control-plane pages):
+
+- `VITE_API_READ_TOKEN`
+- `VITE_API_WRITE_TOKEN`
+
 Example `.env.docker` entries:
 
 ```env
 MDTAS_API_READ_TOKEN=replace-with-long-random-read-token
 MDTAS_API_WRITE_TOKEN=replace-with-long-random-write-token
+VITE_API_READ_TOKEN=replace-with-long-random-read-token
+VITE_API_WRITE_TOKEN=replace-with-long-random-write-token
 ```
 
 ## Local GHCP Usage

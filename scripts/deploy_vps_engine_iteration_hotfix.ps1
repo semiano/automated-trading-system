@@ -95,9 +95,11 @@ $readToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_READ_TOKEN"
 $writeToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_WRITE_TOKEN"
 if ($readToken) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_READ_TOKEN" -Value $readToken
+    Set-EnvValueInFile -Path $envDockerPath -Key "VITE_API_READ_TOKEN" -Value $readToken
 }
 if ($writeToken) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_WRITE_TOKEN" -Value $writeToken
+    Set-EnvValueInFile -Path $envDockerPath -Key "VITE_API_WRITE_TOKEN" -Value $writeToken
 }
 
 Write-Host "Uploading .env.docker to $ip ..."
