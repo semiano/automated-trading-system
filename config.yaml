@@ -138,7 +138,24 @@ trading_1m:
   cooldown_bars_after_stop: 20
   max_entries_per_hour: 12
   max_entries_per_day: 120
+  min_hold_bars: 8
   min_hold_bars_before_signal_exit: 3
+  max_take_profit_pct: 0.0030
+  htf_rsi_timeframe: "15m"
+  htf_rsi_length: 14
+  htf_rsi_sizing:
+    long:
+      lt_35: 1.15
+      r35_45: 1.05
+      r45_60: 1.00
+      r60_70: 0.85
+      gt_70: 0.65
+    short:
+      gt_65: 1.15
+      r55_65: 1.05
+      r40_55: 1.00
+      r30_40: 0.85
+      lt_30: 0.65
   execution_adapter: "paper"
   live_trading_enabled: false
   live_allow_short: true
@@ -174,6 +191,8 @@ trading_1m:
     stop_atr: 1.4
     take_profit_atr: 2.2
     max_hold_bars: 60
+    min_hold_bars: 8
+    max_take_profit_pct: 0.0030
   per_asset_params:
     XRP/USD:
       bb_length: 26
@@ -188,6 +207,8 @@ trading_1m:
       stop_atr: 1.4
       take_profit_atr: 2.0
       max_hold_bars: 60
+      min_hold_bars: 8
+      max_take_profit_pct: 0.0030
 
 trading_5m:
   enabled: true
@@ -198,7 +219,24 @@ trading_5m:
   cooldown_bars_after_stop: 5
   max_entries_per_hour: 3
   max_entries_per_day: 24
+  min_hold_bars: 5
   min_hold_bars_before_signal_exit: 2
+  max_take_profit_pct: 0.0065
+  htf_rsi_timeframe: "1h"
+  htf_rsi_length: 14
+  htf_rsi_sizing:
+    long:
+      lt_35: 1.15
+      r35_45: 1.05
+      r45_60: 1.00
+      r60_70: 0.85
+      gt_70: 0.65
+    short:
+      gt_65: 1.15
+      r55_65: 1.05
+      r40_55: 1.00
+      r30_40: 0.85
+      lt_30: 0.65
   execution_adapter: "paper"
   live_trading_enabled: false
   live_allow_short: true
@@ -234,6 +272,8 @@ trading_5m:
     stop_atr: 1.4
     take_profit_atr: 2.2
     max_hold_bars: 60
+    min_hold_bars: 5
+    max_take_profit_pct: 0.0065
   per_asset_params:
     XRP/USD:
       bb_length: 20
@@ -248,3 +288,5 @@ trading_5m:
       stop_atr: 1.4
       take_profit_atr: 2.2
       max_hold_bars: 60
+      min_hold_bars: 5
+      max_take_profit_pct: 0.0065

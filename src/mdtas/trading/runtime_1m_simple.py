@@ -39,6 +39,8 @@ class Simple1mParams:
     stop_atr: float
     take_profit_atr: float
     max_hold_bars: int
+    min_hold_bars: int
+    max_take_profit_pct: float
 
     def indicator_params(self) -> dict:
         return {
@@ -72,6 +74,8 @@ class Simple1mParamResolver:
             stop_atr=float(item.stop_atr),
             take_profit_atr=float(item.take_profit_atr),
             max_hold_bars=int(item.max_hold_bars),
+            min_hold_bars=int(item.min_hold_bars),
+            max_take_profit_pct=float(item.max_take_profit_pct),
         )
 
     def _resolve_tuned_path(self) -> Path:
@@ -105,6 +109,8 @@ class Simple1mParamResolver:
                     stop_atr=float(tuned.get("stop_atr", 1.4)),
                     take_profit_atr=float(tuned.get("take_profit_atr", 2.2)),
                     max_hold_bars=int(tuned.get("max_hold_bars", 60)),
+                    min_hold_bars=int(tuned.get("min_hold_bars", self.cfg.trading_1m.default_params.min_hold_bars)),
+                    max_take_profit_pct=float(tuned.get("max_take_profit_pct", self.cfg.trading_1m.default_params.max_take_profit_pct)),
                 )
                 logger.info("Loaded 1m tuned params for %s from %s", symbol, path)
             else:
@@ -226,6 +232,54 @@ class Simple1mRuntime:
                 sort_keys=True,
             ),
         )
+
+    def _htf_rsi_multiplier(self, *, symbol: str, venue: str, trade_side: str) -> float:
+        cfg = self.cfg.trading_1m
+        htf_timeframe = cfg.htf_rsi_timeframe
+        try:
+            frame = self.candle_repo.get_candles(
+                symbol=symbol,
+                timeframe=htf_timeframe,
+                venue=venue,
+                start=None,
+                end=None,
+                limit=max(120, cfg.htf_rsi_length + 10),
+                latest=True,
+            )
+            if len(frame) < cfg.htf_rsi_length + 2:
+                return 1.0
+            out = compute(frame, ["rsi"], {"rsi": {"length": int(cfg.htf_rsi_length)}})
+            if len(out) < 2:
+                return 1.0
+            rsi_value = out.iloc[-2].get("rsi")
+            if rsi_value is None or pd.isna(rsi_value):
+                return 1.0
+            rsi = float(rsi_value)
+            if trade_side == "short":
+                m = cfg.htf_rsi_sizing.short
+                if rsi > 65:
+                    return float(m.gt_65)
+                if rsi >= 55:
+                    return float(m.r55_65)
+                if rsi >= 40:
+                    return float(m.r40_55)
+                if rsi >= 30:
+                    return float(m.r30_40)
+                return float(m.lt_30)
+
+            m = cfg.htf_rsi_sizing.long
+            if rsi < 35:
+                return float(m.lt_35)
+            if rsi < 45:
+                return float(m.r35_45)
+            if rsi < 60:
+                return float(m.r45_60)
+            if rsi <= 70:
+                return float(m.r60_70)
+            return float(m.gt_70)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("1m HTF RSI multiplier fallback to 1.0: %s", exc)
+            return 1.0
 
     def evaluate_symbol(self, symbol: str, venue: str) -> None:
         cfg = self.cfg.trading_1m
@@ -353,7 +407,7 @@ class Simple1mRuntime:
 
             sizing = compute_entry_sizing(
                 sizing_mode="fixed_notional",
-                position_size_usd=float(cfg.position_size_usd),
+                position_size_usd=float(cfg.position_size_usd) * self._htf_rsi_multiplier(symbol=symbol, venue=venue, trade_side=chosen_side),
                 risk_per_trade_usd=0.0,
                 max_position_notional_usd=cfg.max_position_notional_usd,
                 raw_entry_price=float(bar["open"]),
@@ -372,12 +426,15 @@ class Simple1mRuntime:
                 constraints=constraints,
             )
             atr = float(prev["atr"])
+            raw_tp_distance = params.take_profit_atr * atr
+            cap_distance = (params.max_take_profit_pct * float(entry_fill.price)) if params.max_take_profit_pct > 0 else raw_tp_distance
+            tp_distance = min(raw_tp_distance, cap_distance)
             if chosen_side == "short":
                 stop_price = float(entry_fill.price) + (params.stop_atr * atr)
-                take_profit_price = float(entry_fill.price) - (params.take_profit_atr * atr)
+                take_profit_price = float(entry_fill.price) - tp_distance
             else:
                 stop_price = float(entry_fill.price) - (params.stop_atr * atr)
-                take_profit_price = float(entry_fill.price) + (params.take_profit_atr * atr)
+                take_profit_price = float(entry_fill.price) + tp_distance
 
             self.trading_repo.open_position(
                 symbol=symbol,
@@ -408,8 +465,9 @@ class Simple1mRuntime:
             stop_hit = open_position.stop_price is not None and float(bar["low"]) <= float(open_position.stop_price)
             tp_hit = open_position.take_profit_price is not None and float(bar["high"]) >= float(open_position.take_profit_price)
 
+        min_signal_hold = max(int(cfg.min_hold_bars_before_signal_exit), int(params.min_hold_bars), int(cfg.min_hold_bars))
         signal_exit = False
-        if hold_bars >= int(cfg.min_hold_bars_before_signal_exit):
+        if hold_bars >= min_signal_hold:
             if is_short:
                 signal_exit = bb_dev <= params.bb_exit_deviation or (close <= ema_fast and slope_now <= 0)
             else:

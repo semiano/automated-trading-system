@@ -148,6 +148,29 @@ class SimpleEngine5mParamsConfig(BaseModel):
     stop_atr: float = 1.4
     take_profit_atr: float = 2.2
     max_hold_bars: int = 60
+    min_hold_bars: int = 5
+    max_take_profit_pct: float = 0.0065
+
+
+class HtfRsiSizingSideConfig(BaseModel):
+    lt_35: float = 1.15
+    r35_45: float = 1.05
+    r45_60: float = 1.00
+    r60_70: float = 0.85
+    gt_70: float = 0.65
+
+
+class HtfRsiSizingShortSideConfig(BaseModel):
+    gt_65: float = 1.15
+    r55_65: float = 1.05
+    r40_55: float = 1.00
+    r30_40: float = 0.85
+    lt_30: float = 0.65
+
+
+class HtfRsiSizingConfig(BaseModel):
+    long: HtfRsiSizingSideConfig = Field(default_factory=HtfRsiSizingSideConfig)
+    short: HtfRsiSizingShortSideConfig = Field(default_factory=HtfRsiSizingShortSideConfig)
 
 
 class Trading5mConfig(BaseModel):
@@ -159,7 +182,12 @@ class Trading5mConfig(BaseModel):
     cooldown_bars_after_stop: int = 5
     max_entries_per_hour: int = 3
     max_entries_per_day: int = 24
+    min_hold_bars: int = 5
     min_hold_bars_before_signal_exit: int = 2
+    max_take_profit_pct: float = 0.0065
+    htf_rsi_timeframe: str = "1h"
+    htf_rsi_length: int = 14
+    htf_rsi_sizing: HtfRsiSizingConfig = Field(default_factory=HtfRsiSizingConfig)
     execution_adapter: Literal["paper", "real"] = "paper"
     live_trading_enabled: bool = False
     live_allow_short: bool = True
@@ -190,6 +218,8 @@ class SimpleEngine1mParamsConfig(BaseModel):
     stop_atr: float = 1.4
     take_profit_atr: float = 2.2
     max_hold_bars: int = 60
+    min_hold_bars: int = 8
+    max_take_profit_pct: float = 0.003
 
 
 class Trading1mConfig(BaseModel):
@@ -201,7 +231,12 @@ class Trading1mConfig(BaseModel):
     cooldown_bars_after_stop: int = 20
     max_entries_per_hour: int = 12
     max_entries_per_day: int = 120
+    min_hold_bars: int = 8
     min_hold_bars_before_signal_exit: int = 3
+    max_take_profit_pct: float = 0.003
+    htf_rsi_timeframe: str = "15m"
+    htf_rsi_length: int = 14
+    htf_rsi_sizing: HtfRsiSizingConfig = Field(default_factory=HtfRsiSizingConfig)
     execution_adapter: Literal["paper", "real"] = "paper"
     live_trading_enabled: bool = False
     live_allow_short: bool = True

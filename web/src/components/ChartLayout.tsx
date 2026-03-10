@@ -243,7 +243,10 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
   const rsiExit = typeof tuning.rsi_exit === "number" ? tuning.rsi_exit : undefined;
   const emaFast = typeof tuning.ema_fast === "number" ? tuning.ema_fast : undefined;
   const maxHoldBars = typeof tuning.max_hold_bars === "number" ? tuning.max_hold_bars : undefined;
-  const minHoldSignalBars = typeof tuning.min_hold_bars_before_signal_exit === "number" ? tuning.min_hold_bars_before_signal_exit : undefined;
+  const minHoldSignalBars =
+    typeof tuning.min_hold_bars === "number"
+      ? tuning.min_hold_bars
+      : (typeof tuning.min_hold_bars_before_signal_exit === "number" ? tuning.min_hold_bars_before_signal_exit : undefined);
   const cooldownBarsAfterExit = typeof tuning.cooldown_bars_after_exit === "number" ? tuning.cooldown_bars_after_exit : (timeframe === "1m" ? 10 : 3);
   const cooldownBarsAfterStop = typeof tuning.cooldown_bars_after_stop === "number" ? tuning.cooldown_bars_after_stop : (timeframe === "1m" ? 20 : 5);
   const maxEntriesPerHour = typeof tuning.max_entries_per_hour === "number" ? tuning.max_entries_per_hour : (timeframe === "1m" ? 12 : 3);
