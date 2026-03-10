@@ -217,6 +217,29 @@ class Simple1mRuntime:
         return latest, lookback_slope
 
     def _emit_decision(self, symbol: str, timeframe: str, ts: datetime, decision: str, reasons: list[str]) -> None:
+        first_reason = reasons[0] if reasons else "hold"
+        if decision in {"enter_long", "enter_short"}:
+            state = "position_opened"
+        elif decision == "exit":
+            state = "position_closed"
+        elif first_reason == "position_open":
+            state = "position_held"
+        elif first_reason in {"missing_indicators", "missing_ema_slope"}:
+            state = "signal_unavailable"
+        elif first_reason in {"cooldown_active", "max_entries_per_hour", "max_entries_per_day"}:
+            state = first_reason
+        else:
+            state = "no_entry_signal"
+
+        self.trading_repo.set_asset_state(
+            symbol=symbol,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            state=state,
+            note=", ".join(reasons)[:256] if reasons else None,
+            log_event=False,
+        )
+
         logger.info(
             "decision_event %s",
             json.dumps(
