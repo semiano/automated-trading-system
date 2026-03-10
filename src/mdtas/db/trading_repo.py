@@ -147,9 +147,12 @@ class TradingRepository:
             timeframe=timeframe,
             default_soft_risk_limit_usd=default_soft_risk_limit_usd,
         )
+        prev_state = item.last_evaluated_state
+        prev_note = item.last_evaluated_note
         item.last_evaluated_state = state
         item.last_evaluated_note = note_for_control
-        if log_event:
+        should_log = log_event and (prev_state != state or prev_note != note_for_control)
+        if should_log:
             self.session.add(
                 AssetEngineLog(
                     symbol=symbol,

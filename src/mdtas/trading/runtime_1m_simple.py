@@ -237,7 +237,7 @@ class Simple1mRuntime:
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             state=state,
             note=", ".join(reasons)[:256] if reasons else None,
-            log_event=False,
+            log_event=True,
         )
 
         logger.info(
