@@ -122,7 +122,7 @@ class AssetControlOut(BaseModel):
     next_run_ts: datetime | None
     last_evaluated_state: str | None
     last_evaluated_note: str | None
-    tuning_params: dict[str, float | int]
+    tuning_params: dict[str, float | int | str | bool]
     live_balance: dict[str, float | str | bool] | None = None
 
 
