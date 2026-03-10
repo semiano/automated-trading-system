@@ -51,6 +51,21 @@ function inferStepSeconds(rows: IndicatorRow[]): number {
   return Math.max(1, Math.min(...diffs));
 }
 
+function inferPricePrecision(rows: IndicatorRow[]): number {
+  const samples = rows.flatMap((row) => [row.open, row.high, row.low, row.close]);
+  let precision = 0;
+  for (const value of samples) {
+    if (!Number.isFinite(value)) continue;
+    const asText = value.toString();
+    const dot = asText.indexOf(".");
+    if (dot >= 0) {
+      precision = Math.max(precision, asText.length - dot - 1);
+    }
+  }
+  // Add one decimal place beyond observed precision so small changes are visible.
+  return Math.min(8, Math.max(2, precision + 1));
+}
+
 function withWhitespaceGaps(rows: IndicatorRow[]): Array<{ time: Time; open?: number; high?: number; low?: number; close?: number; color?: string }> {
   if (rows.length === 0) return [];
   const step = inferStepSeconds(rows);
@@ -183,6 +198,21 @@ export default function CandleChart({ rows, overlays, tradeMarkers, onCrosshair 
       chartRef.current?.timeScale().fitContent();
       didFitOnceRef.current = true;
     }
+  }, [normalizedRows]);
+
+  useEffect(() => {
+    const precision = inferPricePrecision(normalizedRows);
+    const minMove = 1 / (10 ** precision);
+    candleSeriesRef.current?.applyOptions({
+      priceFormat: { type: "price", precision, minMove },
+    });
+    const lineOptions = { priceFormat: { type: "price" as const, precision, minMove } };
+    bbLowerRef.current?.applyOptions(lineOptions);
+    bbMidRef.current?.applyOptions(lineOptions);
+    bbUpperRef.current?.applyOptions(lineOptions);
+    ema20Ref.current?.applyOptions(lineOptions);
+    ema50Ref.current?.applyOptions(lineOptions);
+    ema200Ref.current?.applyOptions(lineOptions);
   }, [normalizedRows]);
 
   useEffect(() => {

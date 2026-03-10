@@ -326,6 +326,10 @@ def list_asset_controls(
                 "take_profit_atr": simple_1m_params.take_profit_atr,
                 "max_hold_bars": simple_1m_params.max_hold_bars,
                 "min_hold_bars_before_signal_exit": cfg.trading_1m.min_hold_bars_before_signal_exit,
+                "cooldown_bars_after_exit": cfg.trading_1m.cooldown_bars_after_exit,
+                "cooldown_bars_after_stop": cfg.trading_1m.cooldown_bars_after_stop,
+                "max_entries_per_hour": cfg.trading_1m.max_entries_per_hour,
+                "max_entries_per_day": cfg.trading_1m.max_entries_per_day,
             }
             bb_entry_mode = "range_revert"
         elif requested_timeframe == cfg.trading_5m.runtime_timeframe:
@@ -343,6 +347,10 @@ def list_asset_controls(
                 "take_profit_atr": simple_params.take_profit_atr,
                 "max_hold_bars": simple_params.max_hold_bars,
                 "min_hold_bars_before_signal_exit": cfg.trading_5m.min_hold_bars_before_signal_exit,
+                "cooldown_bars_after_exit": cfg.trading_5m.cooldown_bars_after_exit,
+                "cooldown_bars_after_stop": cfg.trading_5m.cooldown_bars_after_stop,
+                "max_entries_per_hour": cfg.trading_5m.max_entries_per_hour,
+                "max_entries_per_day": cfg.trading_5m.max_entries_per_day,
             }
             bb_entry_mode = "range_revert"
         else:

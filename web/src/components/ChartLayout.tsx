@@ -42,6 +42,9 @@ type EntryConditionState = {
   bb: boolean | null;
   momentum: boolean | null;
   volatility: boolean | null;
+  gateFlat: boolean;
+  gateCooldown: boolean;
+  gateCadence: boolean;
   all: boolean | null;
 };
 
@@ -241,6 +244,10 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
   const emaFast = typeof tuning.ema_fast === "number" ? tuning.ema_fast : undefined;
   const maxHoldBars = typeof tuning.max_hold_bars === "number" ? tuning.max_hold_bars : undefined;
   const minHoldSignalBars = typeof tuning.min_hold_bars_before_signal_exit === "number" ? tuning.min_hold_bars_before_signal_exit : undefined;
+  const cooldownBarsAfterExit = typeof tuning.cooldown_bars_after_exit === "number" ? tuning.cooldown_bars_after_exit : (timeframe === "1m" ? 10 : 3);
+  const cooldownBarsAfterStop = typeof tuning.cooldown_bars_after_stop === "number" ? tuning.cooldown_bars_after_stop : (timeframe === "1m" ? 20 : 5);
+  const maxEntriesPerHour = typeof tuning.max_entries_per_hour === "number" ? tuning.max_entries_per_hour : (timeframe === "1m" ? 12 : 3);
+  const maxEntriesPerDay = typeof tuning.max_entries_per_day === "number" ? tuning.max_entries_per_day : (timeframe === "1m" ? 120 : 24);
   const minEntryAtrPct = typeof tuning.min_entry_atr_pct === "number" ? tuning.min_entry_atr_pct : 0;
   const bbThreshold = typeof tuning.bb_range_threshold_pct === "number" ? tuning.bb_range_threshold_pct : undefined;
   const bbMode = assetControl?.bb_entry_mode ?? "off";
@@ -261,9 +268,39 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
       ? (evalRow as unknown as Record<string, number | null | undefined>)[`ema${emaFast}`] ?? null
       : null;
 
+  const timeframeSeconds = useMemo(() => {
+    if (timeframe.endsWith("m")) return Math.max(1, Number(timeframe.slice(0, -1))) * 60;
+    if (timeframe.endsWith("h")) return Math.max(1, Number(timeframe.slice(0, -1))) * 3600;
+    if (timeframe.endsWith("d")) return Math.max(1, Number(timeframe.slice(0, -1))) * 86400;
+    return 300;
+  }, [timeframe]);
+
+  const parseTsMs = (ts: string): number => Date.parse(/Z$|[+-]\d{2}:\d{2}$/.test(ts) ? ts : `${ts}Z`);
+
+  const tradeWindows = useMemo(
+    () =>
+      closedTrades
+        .map((t) => ({
+          entryMs: parseTsMs(t.entry_ts),
+          exitMs: parseTsMs(t.exit_ts),
+          exitReason: t.exit_reason,
+        }))
+        .filter((w) => Number.isFinite(w.entryMs) && Number.isFinite(w.exitMs))
+        .sort((a, b) => a.entryMs - b.entryMs),
+    [closedTrades]
+  );
+
+  const openWindows = useMemo(
+    () =>
+      openPositions
+        .map((p) => ({ entryMs: parseTsMs(p.entry_ts) }))
+        .filter((w) => Number.isFinite(w.entryMs)),
+    [openPositions]
+  );
+
   const evaluateEntryState = (prevRow: IndicatorRow | null | undefined, side: "long" | "short"): EntryConditionState => {
     if (!prevRow) {
-      return { rsi: null, trend: null, bb: null, momentum: null, volatility: null, all: null };
+      return { rsi: null, trend: null, bb: null, momentum: null, volatility: null, gateFlat: false, gateCooldown: false, gateCadence: false, all: null };
     }
     const closeValue = prevRow.close ?? null;
     const emaValue = getEmaFastValue(prevRow, emaFast);
@@ -297,8 +334,27 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
         ? (atrValue !== null && closeValue !== null && closeValue > 0 ? (atrValue / closeValue) * 100 >= minEntryAtrPct : null)
         : true;
 
-    const all = allTrue([rsiPass, trendPass, bbPass, momentumPass, volatilityPass]);
-    return { rsi: rsiPass, trend: trendPass, bb: bbPass, momentum: momentumPass, volatility: volatilityPass, all };
+    const evalMs = parseTsMs(prevRow.ts);
+    const gateFlatClosed = !tradeWindows.some((w) => evalMs >= w.entryMs && evalMs <= w.exitMs);
+    const gateFlatOpen = !openWindows.some((w) => evalMs >= w.entryMs);
+    const gateFlat = gateFlatClosed && gateFlatOpen;
+
+    const lastExit = tradeWindows.filter((w) => w.exitMs <= evalMs).sort((a, b) => b.exitMs - a.exitMs)[0];
+    let gateCooldown = true;
+    if (lastExit) {
+      const barsSinceExit = Math.floor((evalMs - lastExit.exitMs) / timeframeSeconds);
+      const required = lastExit.exitReason === "stop" ? cooldownBarsAfterStop : cooldownBarsAfterExit;
+      gateCooldown = barsSinceExit >= required;
+    }
+
+    const entriesLastHour = tradeWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 3600_000).length
+      + openWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 3600_000).length;
+    const entriesLastDay = tradeWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 86_400_000).length
+      + openWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 86_400_000).length;
+    const gateCadence = entriesLastHour < maxEntriesPerHour && entriesLastDay < maxEntriesPerDay;
+
+    const all = allTrue([rsiPass, trendPass, bbPass, momentumPass, volatilityPass, gateFlat, gateCooldown, gateCadence]);
+    return { rsi: rsiPass, trend: trendPass, bb: bbPass, momentum: momentumPass, volatility: volatilityPass, gateFlat, gateCooldown, gateCadence, all };
   };
 
   const currentLong = evaluateEntryState(evalRow, "long");
@@ -475,6 +531,18 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
         thresholdText: minEntryAtrPct > 0 ? `${num(minEntryAtrPct, 4)}%` : "off",
       },
       {
+        key: "gate",
+        label: "Gate",
+        color: "#f97316",
+        value: currentLong.gateFlat && currentLong.gateCooldown && currentLong.gateCadence ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentLong.gateFlat && currentLong.gateCooldown && currentLong.gateCadence,
+        valueText: `F:${currentLong.gateFlat ? 1 : 0} C:${currentLong.gateCooldown ? 1 : 0} R:${currentLong.gateCadence ? 1 : 0}`,
+        thresholdText: "all=1",
+      },
+      {
         key: "all",
         label: "Entry",
         color: "#22c55e",
@@ -487,7 +555,7 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
         thresholdText: "true",
       },
     ];
-  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiEntry, currentLong.rsi, currentLong.trend, currentLong.bb, currentLong.momentum, currentLong.volatility, currentLong.all, momentumEnabled, swingLongReady, minEntryAtrPct]);
+  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiEntry, currentLong.rsi, currentLong.trend, currentLong.bb, currentLong.momentum, currentLong.volatility, currentLong.gateFlat, currentLong.gateCooldown, currentLong.gateCadence, currentLong.all, momentumEnabled, swingLongReady, minEntryAtrPct]);
 
   const shortMetrics = useMemo<ThresholdSliderMetric[]>(() => {
     const rsiValue = evalRow?.rsi ?? null;
@@ -558,6 +626,18 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
         thresholdText: minEntryAtrPct > 0 ? `${num(minEntryAtrPct, 4)}%` : "off",
       },
       {
+        key: "gate",
+        label: "Gate",
+        color: "#f97316",
+        value: currentShort.gateFlat && currentShort.gateCooldown && currentShort.gateCadence ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentShort.gateFlat && currentShort.gateCooldown && currentShort.gateCadence,
+        valueText: `F:${currentShort.gateFlat ? 1 : 0} C:${currentShort.gateCooldown ? 1 : 0} R:${currentShort.gateCadence ? 1 : 0}`,
+        thresholdText: "all=1",
+      },
+      {
         key: "all",
         label: "Entry",
         color: "#ef4444",
@@ -570,7 +650,7 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
         thresholdText: "true",
       },
     ];
-  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiExit, currentShort.rsi, currentShort.trend, currentShort.bb, currentShort.momentum, currentShort.volatility, currentShort.all, momentumEnabled, swingShortReady, minEntryAtrPct]);
+  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiExit, currentShort.rsi, currentShort.trend, currentShort.bb, currentShort.momentum, currentShort.volatility, currentShort.gateFlat, currentShort.gateCooldown, currentShort.gateCadence, currentShort.all, momentumEnabled, swingShortReady, minEntryAtrPct]);
 
   const closeLongMetrics = useMemo<ThresholdSliderMetric[]>(() => {
     const rsiValue = evalRow?.rsi ?? null;
@@ -847,10 +927,10 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
     <div style={{ display: "grid", gridTemplateColumns: panels.volumeProfile ? "1fr 240px" : "1fr" }}>
       <div>
         <div style={{ display: "flex", gap: 12, fontSize: 12, padding: "8px 10px", borderBottom: "1px solid #22262f" }}>
-          <span>O {num(row?.open)}</span>
-          <span>H {num(row?.high)}</span>
-          <span>L {num(row?.low)}</span>
-          <span>C {num(row?.close)}</span>
+          <span>O {num(row?.open, 5)}</span>
+          <span>H {num(row?.high, 5)}</span>
+          <span>L {num(row?.low, 5)}</span>
+          <span>C {num(row?.close, 5)}</span>
           <span>V {num(row?.volume, 0)}</span>
           <span>RSI {num(row?.rsi)}</span>
           <span>ATR {num(row?.atr)}</span>
@@ -894,11 +974,11 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
           </div>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <ThresholdSliders title="Open Long" metrics={longMetrics} sideEnabled={longEnabled} />
+              <ThresholdSliders title="Open Long (Signal + Gates)" metrics={longMetrics} sideEnabled={longEnabled} />
               <ThresholdSliders title="Close Long" metrics={closeLongMetrics} sideEnabled={longEnabled} />
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <ThresholdSliders title="Open Short" metrics={shortMetrics} sideEnabled={shortEnabled} />
+              <ThresholdSliders title="Open Short (Signal + Gates)" metrics={shortMetrics} sideEnabled={shortEnabled} />
               <ThresholdSliders title="Close Short" metrics={closeShortMetrics} sideEnabled={shortEnabled} />
             </div>
           </div>
