@@ -208,48 +208,84 @@ export default function CandleChart({ rows, overlays, tradeMarkers, onCrosshair 
   }, [normalizedRows, overlays]);
 
   useEffect(() => {
-    const markers = tradeMarkers
-      .map((m) => {
+    const candleTimes = normalizedRows.map((r) => toEpochSeconds(r.ts));
+    const stepSeconds = inferStepSeconds(normalizedRows);
+    const toleranceSeconds = Math.max(1, Math.floor(stepSeconds / 2));
+
+    const nearestCandleTime = (target: number): number | null => {
+      if (candleTimes.length === 0) return null;
+      let lo = 0;
+      let hi = candleTimes.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const value = candleTimes[mid];
+        if (value === target) return value;
+        if (value < target) lo = mid + 1;
+        else hi = mid - 1;
+      }
+
+      const right = lo < candleTimes.length ? candleTimes[lo] : null;
+      const left = hi >= 0 ? candleTimes[hi] : null;
+      if (left === null) {
+        return right !== null && Math.abs(right - target) <= toleranceSeconds ? right : null;
+      }
+      if (right === null) {
+        return Math.abs(left - target) <= toleranceSeconds ? left : null;
+      }
+
+      const closest = Math.abs(left - target) <= Math.abs(right - target) ? left : right;
+      return Math.abs(closest - target) <= toleranceSeconds ? closest : null;
+    };
+
+    const markers: SeriesMarker<Time>[] = [];
+    for (const m of tradeMarkers) {
+        const snappedTime = nearestCandleTime(toEpochSeconds(m.ts));
+        if (snappedTime === null) {
+          continue;
+        }
         const modeTag = m.mode === "sim" ? "S" : "R";
         if (m.kind === "long_opened") {
-          return {
-            time: toTime(m.ts),
+          markers.push({
+            time: snappedTime as Time,
             position: "belowBar" as const,
             shape: "arrowUp" as const,
             color: "#22c55e",
             text: `LO-${modeTag}`,
-          };
+          });
+          continue;
         }
         if (m.kind === "long_closed") {
-          return {
-            time: toTime(m.ts),
+          markers.push({
+            time: snappedTime as Time,
             position: "aboveBar" as const,
             shape: "circle" as const,
             color: "#3b82f6",
             text: `LC-${modeTag}`,
-          };
+          });
+          continue;
         }
         if (m.kind === "short_opened") {
-          return {
-            time: toTime(m.ts),
+          markers.push({
+            time: snappedTime as Time,
             position: "aboveBar" as const,
             shape: "arrowDown" as const,
             color: "#ef4444",
             text: `SO-${modeTag}`,
-          };
+          });
+          continue;
         }
-        return {
-          time: toTime(m.ts),
+        markers.push({
+          time: snappedTime as Time,
           position: "belowBar" as const,
           shape: "circle" as const,
           color: "#a855f7",
           text: `SC-${modeTag}`,
-        };
-      })
-      .sort((a, b) => Number(a.time) - Number(b.time)) as SeriesMarker<Time>[];
+        });
+    }
+    markers.sort((a, b) => Number(a.time) - Number(b.time));
 
     markersApiRef.current?.setMarkers(markers);
-  }, [tradeMarkers]);
+  }, [tradeMarkers, normalizedRows]);
 
   return <div ref={ref} style={{ width: "100%", height: 520 }} />;
 }
