@@ -370,8 +370,12 @@ def list_asset_controls(
                 "stop_atr": base_params.stop_atr,
                 "take_profit_atr": base_params.take_profit_atr,
                 "max_hold_bars": base_params.max_hold_bars,
+                "min_hold_bars": base_params.min_hold_bars,
+                "max_take_profit_pct": base_params.max_take_profit_pct,
                 "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
                 "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
+                "htf_rsi_timeframe": cfg.trading.htf_rsi_timeframe,
+                "htf_rsi_length": cfg.trading.htf_rsi_length,
             }
             bb_entry_mode = cfg.trading.bb_entry_mode
 

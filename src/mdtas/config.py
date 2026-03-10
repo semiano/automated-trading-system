@@ -73,6 +73,8 @@ class StrategyParamsConfig(BaseModel):
     stop_atr: float = 1.5
     take_profit_atr: float = 2.5
     max_hold_bars: int = 240
+    min_hold_bars: int = 2
+    max_take_profit_pct: float = 0.025
 
 
 class ExecutionConstraintsConfig(BaseModel):
@@ -90,6 +92,26 @@ class TradingConfig(BaseModel):
     max_position_notional_usd: float | None = None
     use_regime_filter: bool = True
     htf_timeframe: str = "1h"
+    htf_rsi_timeframe: str = "1h"
+    htf_rsi_length: int = 14
+    htf_rsi_long_multipliers: dict[str, float] = Field(
+        default_factory=lambda: {
+            "lt_35": 1.15,
+            "r35_45": 1.05,
+            "r45_60": 1.00,
+            "r60_70": 0.85,
+            "gt_70": 0.65,
+        }
+    )
+    htf_rsi_short_multipliers: dict[str, float] = Field(
+        default_factory=lambda: {
+            "gt_65": 1.15,
+            "r55_65": 1.05,
+            "r40_55": 1.00,
+            "r30_40": 0.85,
+            "lt_30": 0.65,
+        }
+    )
     regime_trend_ema_fast: int = 50
     regime_trend_ema_slow: int = 200
     chop_filter_mode: Literal["none", "bb_width", "atr_pct"] = "bb_width"
@@ -109,6 +131,8 @@ class TradingConfig(BaseModel):
     dynamic_volatility_bb_override_enabled: bool = False
     dynamic_volatility_extreme_bb_width_ratio: float = 1.2
     min_hold_bars_before_signal_exit: int = 0
+    min_hold_bars: int = 2
+    max_take_profit_pct: float = 0.025
     cooldown_bars_after_exit: int = 10
     cooldown_bars_after_stop: int = 30
     max_entries_per_hour: int = 6

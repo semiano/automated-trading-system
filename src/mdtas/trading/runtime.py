@@ -148,6 +148,8 @@ class StrategyParams:
     stop_atr: float
     take_profit_atr: float
     max_hold_bars: int
+    min_hold_bars: int
+    max_take_profit_pct: float
 
     def indicator_params(self) -> dict:
         return {
@@ -177,6 +179,8 @@ class AssetParamResolver:
             stop_atr=float(item.stop_atr),
             take_profit_atr=float(item.take_profit_atr),
             max_hold_bars=int(item.max_hold_bars),
+            min_hold_bars=int(item.min_hold_bars),
+            max_take_profit_pct=float(item.max_take_profit_pct),
         )
 
     def _resolve_tuned_path(self) -> Path:
@@ -207,6 +211,8 @@ class AssetParamResolver:
                     stop_atr=float(tuned.get("stop_atr", 1.5)),
                     take_profit_atr=float(tuned.get("take_profit_atr", 2.5)),
                     max_hold_bars=int(tuned.get("max_hold_bars", 240)),
+                    min_hold_bars=int(tuned.get("min_hold_bars", self.cfg.trading.default_params.min_hold_bars)),
+                    max_take_profit_pct=float(tuned.get("max_take_profit_pct", self.cfg.trading.default_params.max_take_profit_pct)),
                 )
                 logger.info("Loaded tuned strategy params for %s from %s", symbol, path)
             else:
@@ -415,6 +421,57 @@ class TradingRuntime:
             execution_mode=execution_mode,
         )
         return float(current_risk), float(per_symbol_limit)
+
+    def _htf_rsi_multiplier(self, *, symbol: str, venue: str, trade_side: str, fallback_rsi: float | None) -> float:
+        cfg = self.cfg.trading
+
+        def _from_rsi(rsi: float) -> float:
+            if trade_side == "short":
+                m = cfg.htf_rsi_short_multipliers
+                if rsi > 65:
+                    return float(m.get("gt_65", 1.15))
+                if rsi >= 55:
+                    return float(m.get("r55_65", 1.05))
+                if rsi >= 40:
+                    return float(m.get("r40_55", 1.00))
+                if rsi >= 30:
+                    return float(m.get("r30_40", 0.85))
+                return float(m.get("lt_30", 0.65))
+
+            m = cfg.htf_rsi_long_multipliers
+            if rsi < 35:
+                return float(m.get("lt_35", 1.15))
+            if rsi < 45:
+                return float(m.get("r35_45", 1.05))
+            if rsi < 60:
+                return float(m.get("r45_60", 1.00))
+            if rsi <= 70:
+                return float(m.get("r60_70", 0.85))
+            return float(m.get("gt_70", 0.65))
+
+        htf_timeframe = cfg.htf_rsi_timeframe or cfg.htf_timeframe
+        try:
+            htf_frame = self.candle_repo.get_candles(
+                symbol=symbol,
+                timeframe=htf_timeframe,
+                venue=venue,
+                start=None,
+                end=None,
+                limit=max(120, int(cfg.htf_rsi_length) + 10),
+                latest=True,
+            )
+            if len(htf_frame) >= int(cfg.htf_rsi_length) + 2:
+                out = compute(htf_frame, ["rsi"], {"rsi": {"length": int(cfg.htf_rsi_length)}})
+                if len(out) >= 2:
+                    rsi_value = out.iloc[-2].get("rsi")
+                    if rsi_value is not None and pd.notna(rsi_value):
+                        return _from_rsi(float(rsi_value))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("HTF RSI sizing fallback due to error: %s", exc)
+
+        if fallback_rsi is not None and math.isfinite(float(fallback_rsi)):
+            return _from_rsi(float(fallback_rsi))
+        return 1.0
 
     def evaluate_symbol(self, symbol: str, venue: str) -> None:
         if not self.cfg.trading.enabled:
@@ -743,10 +800,18 @@ class TradingRuntime:
             if pd.notna(prev.get("atr")):
                 atr_for_sizing = float(prev["atr"])
 
+            fallback_rsi = float(prev["rsi"]) if pd.notna(prev.get("rsi")) else None
+            size_multiplier = self._htf_rsi_multiplier(
+                symbol=symbol,
+                venue=venue,
+                trade_side=chosen_side,
+                fallback_rsi=fallback_rsi,
+            )
+
             sizing_result = compute_entry_sizing(
                 sizing_mode=self.cfg.trading.sizing_mode,
-                position_size_usd=float(self.cfg.trading.position_size_usd),
-                risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                position_size_usd=float(self.cfg.trading.position_size_usd) * size_multiplier,
+                risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd) * size_multiplier,
                 max_position_notional_usd=self.cfg.trading.max_position_notional_usd,
                 raw_entry_price=raw_entry_price,
                 atr=atr_for_sizing,
@@ -888,13 +953,16 @@ class TradingRuntime:
                 return
 
             atr = float(prev["atr"])
+            raw_tp_distance = params.take_profit_atr * atr
+            cap_distance = (params.max_take_profit_pct * float(entry_fill.price)) if params.max_take_profit_pct > 0 else raw_tp_distance
+            tp_distance = min(raw_tp_distance, cap_distance)
             if chosen_side == "short":
                 stop_price = entry_fill.price + (params.stop_atr * atr)
-                take_profit_price = entry_fill.price - (params.take_profit_atr * atr)
+                take_profit_price = entry_fill.price - tp_distance
                 projected_trade_risk = max(stop_price - entry_fill.price, 0.0) * entry_fill.qty + entry_fill.fee_usd
             else:
                 stop_price = entry_fill.price - (params.stop_atr * atr)
-                take_profit_price = entry_fill.price + (params.take_profit_atr * atr)
+                take_profit_price = entry_fill.price + tp_distance
                 projected_trade_risk = max(entry_fill.price - stop_price, 0.0) * entry_fill.qty + entry_fill.fee_usd
 
             current_risk, risk_limit = self._current_risk_and_limit(
@@ -1201,7 +1269,10 @@ class TradingRuntime:
 
         indicator_exit = False
         if pd.notna(prev.get("rsi")) and pd.notna(prev.get(fast_col)) and pd.notna(prev.get("close")):
-            min_hold_before_signal = max(0, int(self.cfg.trading.min_hold_bars_before_signal_exit))
+            min_hold_before_signal = max(
+                0,
+                int(max(params.min_hold_bars, self.cfg.trading.min_hold_bars_before_signal_exit)),
+            )
             if hold_bars >= min_hold_before_signal:
                 if is_short:
                     indicator_exit = float(prev["rsi"]) <= params.rsi_entry or float(prev["close"]) > float(prev[fast_col])

@@ -235,11 +235,11 @@ class Simple1mRuntime:
 
     def _htf_rsi_multiplier(self, *, symbol: str, venue: str, trade_side: str) -> float:
         cfg = self.cfg.trading_1m
-        htf_timeframe = cfg.htf_rsi_timeframe
-        try:
+
+        def _resolve_rsi(timeframe: str) -> float | None:
             frame = self.candle_repo.get_candles(
                 symbol=symbol,
-                timeframe=htf_timeframe,
+                timeframe=timeframe,
                 venue=venue,
                 start=None,
                 end=None,
@@ -247,14 +247,21 @@ class Simple1mRuntime:
                 latest=True,
             )
             if len(frame) < cfg.htf_rsi_length + 2:
-                return 1.0
+                return None
             out = compute(frame, ["rsi"], {"rsi": {"length": int(cfg.htf_rsi_length)}})
             if len(out) < 2:
-                return 1.0
+                return None
             rsi_value = out.iloc[-2].get("rsi")
             if rsi_value is None or pd.isna(rsi_value):
+                return None
+            return float(rsi_value)
+
+        try:
+            rsi = _resolve_rsi(cfg.htf_rsi_timeframe)
+            if rsi is None:
+                rsi = _resolve_rsi(cfg.runtime_timeframe)
+            if rsi is None:
                 return 1.0
-            rsi = float(rsi_value)
             if trade_side == "short":
                 m = cfg.htf_rsi_sizing.short
                 if rsi > 65:
