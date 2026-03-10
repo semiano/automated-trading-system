@@ -13,6 +13,7 @@ type Props = {
   onPnlMode: (mode: "sim" | "live") => void;
   onSaveAssetControl: (payload: {
     symbol: string;
+    timeframe: string;
     enabled?: boolean;
     execution_mode?: "sim" | "live";
     trade_side?: "long_only" | "long_short" | "short_only";
@@ -78,7 +79,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   useEffect(() => {
     const next: Record<string, string> = {};
     for (const row of assetControls) {
-      next[row.symbol] = String(row.soft_risk_limit_usd);
+      next[`${row.symbol}:${row.timeframe}`] = String(row.soft_risk_limit_usd);
     }
     setDraftLimits(next);
   }, [assetControls]);
@@ -105,13 +106,14 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
         nextRun: row.next_run_ts ?? "",
         risk: row.current_risk_usd,
       };
-      const prev = prevSignalsRef.current[row.symbol];
+      const key = `${row.symbol}:${row.timeframe}`;
+      const prev = prevSignalsRef.current[key];
       if (prev) {
-        if (prev.lastRun !== signal.lastRun) flashUpdates[`${row.symbol}:last`] = now + 900;
-        if (prev.nextRun !== signal.nextRun) flashUpdates[`${row.symbol}:next`] = now + 900;
-        if (prev.risk !== signal.risk) flashUpdates[`${row.symbol}:risk`] = now + 900;
+        if (prev.lastRun !== signal.lastRun) flashUpdates[`${key}:last`] = now + 900;
+        if (prev.nextRun !== signal.nextRun) flashUpdates[`${key}:next`] = now + 900;
+        if (prev.risk !== signal.risk) flashUpdates[`${key}:risk`] = now + 900;
       }
-      nextSignals[row.symbol] = signal;
+      nextSignals[key] = signal;
     }
 
     prevSignalsRef.current = nextSignals;
@@ -384,8 +386,8 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             </thead>
             <tbody>
               {assetControls.map((row) => (
-                <tr key={row.symbol} style={{ borderTop: "1px solid #1b1f29" }}>
-                  <td style={{ padding: 8 }}>{row.symbol}</td>
+                <tr key={`${row.symbol}:${row.timeframe}`} style={{ borderTop: "1px solid #1b1f29" }}>
+                  <td style={{ padding: 8 }}>{row.symbol} <span style={{ color: "#9ca3af" }}>({row.timeframe})</span></td>
                   <td style={{ padding: 8 }}>
                     <div style={{ display: "inline-flex", border: "1px solid #2d3340", borderRadius: 6, overflow: "hidden" }}>
                       <button
@@ -394,7 +396,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, enabled: true });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, enabled: true });
                           } finally {
                             setSaving(false);
                           }
@@ -416,7 +418,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, enabled: false });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, enabled: false });
                           } finally {
                             setSaving(false);
                           }
@@ -441,7 +443,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, trade_side: "long_only" });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, trade_side: "long_only" });
                           } finally {
                             setSaving(false);
                           }
@@ -463,7 +465,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, trade_side: "long_short" });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, trade_side: "long_short" });
                           } finally {
                             setSaving(false);
                           }
@@ -485,7 +487,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, trade_side: "short_only" });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, trade_side: "short_only" });
                           } finally {
                             setSaving(false);
                           }
@@ -510,7 +512,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, execution_mode: "sim" });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, execution_mode: "sim" });
                           } finally {
                             setSaving(false);
                           }
@@ -532,7 +534,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, execution_mode: "live" });
+                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, execution_mode: "live" });
                           } finally {
                             setSaving(false);
                           }
@@ -561,19 +563,19 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       type="number"
                       min={0}
                       step={1}
-                      value={draftLimits[row.symbol] ?? String(row.soft_risk_limit_usd)}
-                      onChange={(e) => setDraftLimits((prev) => ({ ...prev, [row.symbol]: e.target.value }))}
+                      value={draftLimits[`${row.symbol}:${row.timeframe}`] ?? String(row.soft_risk_limit_usd)}
+                      onChange={(e) => setDraftLimits((prev) => ({ ...prev, [`${row.symbol}:${row.timeframe}`]: e.target.value }))}
                       style={{ width: 90, padding: "3px 6px", background: "#0f131c", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
                     />
                     <button
                       type="button"
                       disabled={saving}
                       onClick={async () => {
-                        const parsed = Number(draftLimits[row.symbol]);
+                        const parsed = Number(draftLimits[`${row.symbol}:${row.timeframe}`]);
                         if (!Number.isFinite(parsed) || parsed < 0) return;
                         setSaving(true);
                         try {
-                          await onSaveAssetControl({ symbol: row.symbol, soft_risk_limit_usd: parsed });
+                          await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, soft_risk_limit_usd: parsed });
                         } finally {
                           setSaving(false);
                         }
@@ -584,16 +586,16 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                     </button>
                   </td>
                   <td style={{ textAlign: "right", padding: 8 }}>
-                    <span style={cellPulseStyle(`${row.symbol}:risk`)}>{num(row.current_risk_usd, 4)}</span>
+                    <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:risk`)}>{num(row.current_risk_usd, 4)}</span>
                   </td>
                   <td style={{ padding: 8 }}>
-                    <span style={cellPulseStyle(`${row.symbol}:last`)}>{parseApiTimestamp(row.last_run_ts)?.toLocaleString() ?? "-"}</span>
+                    <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:last`)}>{parseApiTimestamp(row.last_run_ts)?.toLocaleString() ?? "-"}</span>
                     <span style={{ color: "#9ca3af", marginLeft: 6 }}>
                       {row.last_evaluated_state ? `(${formatAssetState(row.last_evaluated_state, row.last_evaluated_note)})` : ""}
                     </span>
                   </td>
                   <td style={{ padding: 8 }}>
-                    <span style={cellPulseStyle(`${row.symbol}:next`)}>{formatCountdown(row.next_run_ts)}</span>
+                    <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:next`)}>{formatCountdown(row.next_run_ts)}</span>
                   </td>
                   <td style={{ padding: 8, maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {Object.entries(row.tuning_params).map(([k, v]) => `${k}=${v}`).join(", ")}
@@ -672,7 +674,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         setLogSymbol(row.symbol);
                         setLogsLoading(true);
                         try {
-                          const logs = await fetchAssetLogs({ symbol: row.symbol, limit: 200 });
+                          const logs = await fetchAssetLogs({ symbol: row.symbol, timeframe: row.timeframe, limit: 200 });
                           setLogRows(logs);
                         } finally {
                           setLogsLoading(false);
@@ -732,6 +734,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left", padding: 8 }}>Timestamp</th>
+                      <th style={{ textAlign: "left", padding: 8 }}>Timeframe</th>
                       <th style={{ textAlign: "left", padding: 8 }}>State</th>
                       <th style={{ textAlign: "left", padding: 8 }}>Note</th>
                     </tr>
@@ -740,6 +743,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                     {logRows.map((row) => (
                       <tr key={row.id} style={{ borderTop: "1px solid #1b1f29" }}>
                         <td style={{ padding: 8 }}>{new Date(row.created_at).toLocaleString()}</td>
+                        <td style={{ padding: 8 }}>{row.timeframe}</td>
                         <td style={{ padding: 8 }}>{row.state}</td>
                         <td style={{ padding: 8 }}>{row.note ?? "-"}</td>
                       </tr>
@@ -759,6 +763,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             <thead>
               <tr>
                 <th style={{ textAlign: "left", padding: 8 }}>Symbol</th>
+                <th style={{ textAlign: "left", padding: 8 }}>Timeframe</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Side</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Entry</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Last</th>
@@ -770,11 +775,12 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             </thead>
             <tbody>
               {openPositions.length === 0 ? (
-                <tr><td style={{ padding: 8 }} colSpan={8}>No open positions.</td></tr>
+                <tr><td style={{ padding: 8 }} colSpan={9}>No open positions.</td></tr>
               ) : (
                 openPositions.map((row) => (
                   <tr key={row.id} style={{ borderTop: "1px solid #1b1f29" }}>
                     <td style={{ padding: 8 }}>{row.symbol}</td>
+                    <td style={{ padding: 8 }}>{row.timeframe}</td>
                     <td style={{ padding: 8 }}>{row.trade_side === "short" ? "Short" : "Long"}</td>
                     <td style={{ textAlign: "right", padding: 8 }}>{num(row.entry_price, 6)}</td>
                     <td style={{ textAlign: "right", padding: 8 }}>{num(row.last_price, 6)}</td>

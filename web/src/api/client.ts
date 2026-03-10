@@ -129,13 +129,14 @@ export async function fetchAssetControls(args: { timeframe?: string } = {}): Pro
 
 export async function updateAssetControl(args: {
   symbol: string;
+  timeframe: string;
   enabled?: boolean;
   execution_mode?: "sim" | "live";
   trade_side?: "long_only" | "long_short" | "short_only";
   soft_risk_limit_usd?: number;
 }): Promise<AssetControl> {
   const response = await fetch(
-    `${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}`,
+    `${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}?${qs({ timeframe: args.timeframe })}`,
     withApiKey("write", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -151,9 +152,9 @@ export async function updateAssetControl(args: {
   return (await response.json()) as AssetControl;
 }
 
-export async function fetchAssetLogs(args: { symbol: string; limit?: number }): Promise<AssetEngineLog[]> {
+export async function fetchAssetLogs(args: { symbol: string; timeframe?: string; limit?: number }): Promise<AssetEngineLog[]> {
   const response = await fetch(
-    `${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}/logs?${qs({ limit: args.limit ?? 100 })}`,
+    `${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}/logs?${qs({ timeframe: args.timeframe, limit: args.limit ?? 100 })}`,
     withApiKey("write")
   );
   if (!response.ok) throw new Error("Failed to fetch asset logs");

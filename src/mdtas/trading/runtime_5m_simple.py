@@ -296,6 +296,7 @@ class Simple5mRuntime:
         timeframe = cfg.runtime_timeframe
         control = self.trading_repo.mark_asset_run(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             poll_delay_seconds=self.cfg.ingestion.poll_delay_seconds,
         )
@@ -316,7 +317,8 @@ class Simple5mRuntime:
         if len(frame) < required_bars:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="runtime5m_insufficient_bars",
                 note=f"have={len(frame)}, need={required_bars}, timeframe={timeframe}",
                 log_event=True,

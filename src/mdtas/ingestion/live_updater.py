@@ -421,13 +421,15 @@ def run_live_loop(
         now = datetime.utcnow().replace(microsecond=0)
         for symbol in symbols:
             if trading_runtime is not None and not trading_runtime.is_symbol_enabled(symbol):
-                trading_runtime.trading_repo.set_asset_state(
-                    symbol=symbol,
-                    default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="paused",
-                    note="Asset is paused",
-                    log_event=False,
-                )
+                for tf in timeframes:
+                    trading_runtime.trading_repo.set_asset_state(
+                        symbol=symbol,
+                        timeframe=tf,
+                        default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+                        state="paused",
+                        note="Asset is paused",
+                        log_event=False,
+                    )
                 logger.debug("Skipping %s because asset is paused", symbol)
                 continue
 
@@ -462,6 +464,7 @@ def run_live_loop(
                 if cfg.trading.runtime_timeframe in timeframes and not runtime_tf_ok:
                     trading_runtime.trading_repo.set_asset_state(
                         symbol=symbol,
+                        timeframe=cfg.trading.runtime_timeframe,
                         default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
                         state="runtime_tf_missing",
                         note=f"No successful update for {cfg.trading.runtime_timeframe}",

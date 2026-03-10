@@ -148,7 +148,8 @@ class AssetControl(Base):
     __tablename__ = "asset_controls"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    symbol: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True, default="5m")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     execution_mode: Mapped[str] = mapped_column(String(16), default="sim")
     trade_side: Mapped[str] = mapped_column(String(16), default="long_only")
@@ -161,12 +162,18 @@ class AssetControl(Base):
         DateTime(timezone=False), default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", name="uq_asset_control_symbol_timeframe"),
+        Index("idx_asset_control_symbol_timeframe", "symbol", "timeframe"),
+    )
+
 
 class AssetEngineLog(Base):
     __tablename__ = "asset_engine_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String(64), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True, default="5m")
     state: Mapped[str] = mapped_column(String(64), index=True)
     note: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -174,5 +181,5 @@ class AssetEngineLog(Base):
     )
 
     __table_args__ = (
-        Index("idx_asset_engine_logs_symbol_ts", "symbol", "created_at"),
+        Index("idx_asset_engine_logs_symbol_tf_ts", "symbol", "timeframe", "created_at"),
     )

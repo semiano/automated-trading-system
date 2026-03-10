@@ -96,7 +96,7 @@ export type AssetControl = {
   next_run_ts?: string | null;
   last_evaluated_state?: string | null;
   last_evaluated_note?: string | null;
-  tuning_params: Record<string, number>;
+  tuning_params: Record<string, number | string | boolean>;
   live_balance?: {
     status: string;
     can_long?: boolean;
@@ -132,6 +132,7 @@ export type AssetValueBalanceResponse = {
 export type AssetEngineLog = {
   id: number;
   symbol: string;
+  timeframe: string;
   state: string;
   note?: string | null;
   created_at: string;

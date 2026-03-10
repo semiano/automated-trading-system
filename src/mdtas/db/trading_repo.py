@@ -19,15 +19,22 @@ class TradingRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def log_engine_event(self, symbol: str, state: str, note: str | None = None) -> AssetEngineLog:
-        row = AssetEngineLog(symbol=symbol, state=state, note=note)
+    def log_engine_event(self, symbol: str, state: str, note: str | None = None, timeframe: str = "system") -> AssetEngineLog:
+        row = AssetEngineLog(symbol=symbol, timeframe=timeframe, state=state, note=note)
         self.session.add(row)
         self.session.commit()
         self.session.refresh(row)
         return row
 
-    def latest_engine_event(self, symbol: str, states: tuple[str, ...] | None = None) -> AssetEngineLog | None:
+    def latest_engine_event(
+        self,
+        symbol: str,
+        states: tuple[str, ...] | None = None,
+        timeframe: str | None = None,
+    ) -> AssetEngineLog | None:
         stmt = select(AssetEngineLog).where(AssetEngineLog.symbol == symbol)
+        if timeframe is not None:
+            stmt = stmt.where(AssetEngineLog.timeframe == timeframe)
         if states:
             stmt = stmt.where(AssetEngineLog.state.in_(states))
         stmt = stmt.order_by(AssetEngineLog.created_at.desc(), AssetEngineLog.id.desc()).limit(1)
@@ -36,15 +43,21 @@ class TradingRepository:
     def get_or_create_asset_control(
         self,
         symbol: str,
+        timeframe: str,
         default_soft_risk_limit_usd: float,
         default_execution_mode: str = "sim",
         default_trade_side: str = "long_only",
         default_enabled: bool = True,
     ) -> AssetControl:
-        item = self.session.scalar(select(AssetControl).where(AssetControl.symbol == symbol).limit(1))
+        item = self.session.scalar(
+            select(AssetControl)
+            .where(AssetControl.symbol == symbol, AssetControl.timeframe == timeframe)
+            .limit(1)
+        )
         if item is None:
             item = AssetControl(
                 symbol=symbol,
+                timeframe=timeframe,
                 enabled=default_enabled,
                 execution_mode=default_execution_mode,
                 trade_side=default_trade_side,
@@ -58,26 +71,30 @@ class TradingRepository:
     def list_asset_controls(
         self,
         symbols: list[str],
+        timeframes: list[str],
         default_soft_risk_limit_usd: float,
         default_execution_mode: str = "sim",
         default_trade_side: str = "long_only",
     ) -> list[AssetControl]:
         out: list[AssetControl] = []
         for symbol in symbols:
-            out.append(
-                self.get_or_create_asset_control(
-                    symbol=symbol,
-                    default_soft_risk_limit_usd=default_soft_risk_limit_usd,
-                    default_execution_mode=default_execution_mode,
-                    default_trade_side=default_trade_side,
-                    default_enabled=True,
+            for timeframe in timeframes:
+                out.append(
+                    self.get_or_create_asset_control(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        default_soft_risk_limit_usd=default_soft_risk_limit_usd,
+                        default_execution_mode=default_execution_mode,
+                        default_trade_side=default_trade_side,
+                        default_enabled=True,
+                    )
                 )
-            )
         return out
 
     def update_asset_control(
         self,
         symbol: str,
+        timeframe: str,
         default_soft_risk_limit_usd: float,
         enabled: bool | None = None,
         execution_mode: str | None = None,
@@ -86,6 +103,7 @@ class TradingRepository:
     ) -> AssetControl:
         item = self.get_or_create_asset_control(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=default_soft_risk_limit_usd,
         )
         if enabled is not None:
@@ -100,9 +118,10 @@ class TradingRepository:
         self.session.refresh(item)
         return item
 
-    def mark_asset_run(self, symbol: str, default_soft_risk_limit_usd: float, poll_delay_seconds: int) -> AssetControl:
+    def mark_asset_run(self, symbol: str, timeframe: str, default_soft_risk_limit_usd: float, poll_delay_seconds: int) -> AssetControl:
         item = self.get_or_create_asset_control(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=default_soft_risk_limit_usd,
         )
         now = datetime.utcnow().replace(microsecond=0)
@@ -115,6 +134,7 @@ class TradingRepository:
     def set_asset_state(
         self,
         symbol: str,
+        timeframe: str,
         default_soft_risk_limit_usd: float,
         state: str,
         note: str | None = None,
@@ -124,6 +144,7 @@ class TradingRepository:
         note_for_log = note[:512] if note is not None else None
         item = self.get_or_create_asset_control(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=default_soft_risk_limit_usd,
         )
         item.last_evaluated_state = state
@@ -132,6 +153,7 @@ class TradingRepository:
             self.session.add(
                 AssetEngineLog(
                     symbol=symbol,
+                    timeframe=timeframe,
                     state=state,
                     note=note_for_log,
                 )
@@ -140,10 +162,12 @@ class TradingRepository:
         self.session.refresh(item)
         return item
 
-    def list_asset_logs(self, symbol: str, limit: int) -> list[AssetEngineLog]:
+    def list_asset_logs(self, symbol: str, timeframe: str | None, limit: int) -> list[AssetEngineLog]:
+        stmt = select(AssetEngineLog).where(AssetEngineLog.symbol == symbol)
+        if timeframe is not None:
+            stmt = stmt.where(AssetEngineLog.timeframe == timeframe)
         return self.session.scalars(
-            select(AssetEngineLog)
-            .where(AssetEngineLog.symbol == symbol)
+            stmt
             .order_by(AssetEngineLog.created_at.desc(), AssetEngineLog.id.desc())
             .limit(limit)
         ).all()

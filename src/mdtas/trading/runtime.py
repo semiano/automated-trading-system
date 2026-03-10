@@ -332,8 +332,10 @@ class TradingRuntime:
             return PaperExecutionAdapter(slippage_bps=self.cfg.trading.slippage_bps)
 
     def is_symbol_enabled(self, symbol: str) -> bool:
+        timeframe = self.cfg.trading.runtime_timeframe
         control = self.trading_repo.get_or_create_asset_control(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             default_execution_mode="sim",
             default_trade_side="long_only",
@@ -477,22 +479,25 @@ class TradingRuntime:
         if not self.cfg.trading.enabled:
             return
 
+        timeframe = self.cfg.trading.runtime_timeframe
+
         control = self.trading_repo.mark_asset_run(
             symbol=symbol,
+            timeframe=timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             poll_delay_seconds=self.cfg.ingestion.poll_delay_seconds,
         )
         if not control.enabled:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="paused",
                 note="Asset is paused",
                 log_event=False,
             )
             return
 
-        timeframe = self.cfg.trading.runtime_timeframe
         execution_mode = control.execution_mode
         trade_side_mode = control.trade_side
         params = self.params_resolver.for_symbol(symbol)
@@ -523,7 +528,8 @@ class TradingRuntime:
             missing_bars = required_bars - available_bars
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="insufficient_bars",
                 note=f"Need {required_bars} bars on {timeframe}; have {available_bars} (missing {missing_bars})",
                 log_event=True,
@@ -558,7 +564,8 @@ class TradingRuntime:
         if datetime.utcnow().replace(microsecond=0) - latest_ts > max_stale_age:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="stale_data",
                 note=f"Latest candle ts={latest_ts.isoformat()}",
                 log_event=True,
@@ -600,7 +607,8 @@ class TradingRuntime:
         if len(out) < 2:
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="insufficient_signal_rows",
                 note=f"indicator_rows={len(out)}",
                 log_event=True,
@@ -662,7 +670,8 @@ class TradingRuntime:
             if chosen_side is None:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="no_entry_signal",
                     note=(
                         f"mode={trade_side_mode}; "
@@ -687,7 +696,8 @@ class TradingRuntime:
             if self.cfg.trading.use_regime_filter and regime.get("chop_state") == "chop":
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="chop_blocked",
                     note=(
                         f"htf={htf_timeframe}, trend={regime.get('trend_state')}, chop={regime.get('chop_state')}, "
@@ -717,7 +727,8 @@ class TradingRuntime:
                 if not trend_ok:
                     self.trading_repo.set_asset_state(
                         symbol=symbol,
-                        default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                         state="regime_blocked",
                         note=(
                             f"htf={htf_timeframe}, side={chosen_side}, trend={regime.get('trend_state')}, "
@@ -776,7 +787,8 @@ class TradingRuntime:
             if guard.blocked_reason is not None:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state=guard.blocked_reason,
                     note=guard.details,
                     log_event=True,
@@ -822,7 +834,8 @@ class TradingRuntime:
             if sizing_result.sizing_reason is not None:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="sizing_invalid",
                     note=(
                         f"mode={self.cfg.trading.sizing_mode}, reason={sizing_result.sizing_reason}, "
@@ -862,7 +875,8 @@ class TradingRuntime:
             except Exception as exc:  # noqa: BLE001
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="execution_failed",
                     note=f"entry_failed: {exc}",
                     log_event=True,
@@ -893,7 +907,8 @@ class TradingRuntime:
             if max_position_notional is not None and max_position_notional > 0 and entry_notional > max_position_notional:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="max_notional_blocked",
                     note=(
                         f"notional={entry_notional:.4f} > max_position_notional={max_position_notional:.4f}; "
@@ -924,7 +939,8 @@ class TradingRuntime:
             if constraints.min_notional_usd > 0 and entry_notional < constraints.min_notional_usd:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="min_notional_blocked",
                     note=(
                         f"notional={entry_notional:.4f} < min_notional={constraints.min_notional_usd:.4f}; "
@@ -975,7 +991,8 @@ class TradingRuntime:
             if risk_limit > 0 and current_risk + projected_trade_risk > risk_limit:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="risk_blocked",
                     note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={risk_limit:.4f}",
                     log_event=True,
@@ -1017,7 +1034,8 @@ class TradingRuntime:
             )
             self.trading_repo.set_asset_state(
                 symbol=symbol,
-                default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="position_opened",
                 note=(
                     f"mode={execution_mode}, side={chosen_side}, fill={entry_fill.price:.6f}, "
@@ -1299,6 +1317,7 @@ class TradingRuntime:
                 summary.append(f"close={float(prev['close']):.6f}")
             self.trading_repo.set_asset_state(
                 symbol=position.symbol,
+                timeframe=position.timeframe,
                 default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="position_held",
                 note=", ".join(summary),
@@ -1342,6 +1361,7 @@ class TradingRuntime:
         except Exception as exc:  # noqa: BLE001
             self.trading_repo.set_asset_state(
                 symbol=position.symbol,
+                timeframe=position.timeframe,
                 default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                 state="execution_failed",
                 note=f"exit_failed: {exc}",
@@ -1366,6 +1386,7 @@ class TradingRuntime:
         )
         self.trading_repo.set_asset_state(
             symbol=trade.symbol,
+            timeframe=trade.timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             state="position_closed",
             note=f"reason={reason}, side={trade.trade_side}, fill={exit_fill.price:.6f}, net_pnl={trade.net_pnl:.6f}",

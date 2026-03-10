@@ -115,6 +115,19 @@ def _runtime_config_for_timeframe(cfg, timeframe: str):
     return cfg.trading
 
 
+def _control_plane_timeframes(cfg) -> list[str]:
+    ordered = [
+        cfg.trading_1m.runtime_timeframe,
+        cfg.trading_5m.runtime_timeframe,
+        cfg.trading.runtime_timeframe,
+    ]
+    out: list[str] = []
+    for tf in ordered:
+        if tf and tf not in out:
+            out.append(tf)
+    return out
+
+
 def _live_balance_snapshot(*, cfg, runtime_cfg, adapter: CcxtExecutionAdapter, symbol: str, trade_side: str) -> dict[str, float | str | bool]:
     base_ccy, quote_ccy = _split_symbol(symbol)
     balance = adapter.exchange.fetch_balance()
@@ -265,20 +278,28 @@ def list_asset_controls(
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
-    requested_timeframe = timeframe or cfg.trading.runtime_timeframe
-    runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
+    requested_timeframes = [timeframe] if timeframe else _control_plane_timeframes(cfg)
     base_resolver = AssetParamResolver(cfg)
     simple_1m_resolver = Simple1mParamResolver(cfg)
     simple_5m_resolver = Simple5mParamResolver(cfg)
-    live_adapter: CcxtExecutionAdapter | None = None
-    live_adapter_error: str | None = None
-    if runtime_cfg.execution_adapter == "real":
-        try:
-            live_adapter = _build_live_adapter(cfg, runtime_cfg)
-        except Exception as exc:  # noqa: BLE001
-            live_adapter_error = str(exc)
+    live_adapters: dict[str, CcxtExecutionAdapter | None] = {}
+    live_adapter_errors: dict[str, str | None] = {}
+    for tf in requested_timeframes:
+        runtime_cfg = _runtime_config_for_timeframe(cfg, tf)
+        if runtime_cfg.execution_adapter == "real":
+            try:
+                live_adapters[tf] = _build_live_adapter(cfg, runtime_cfg)
+                live_adapter_errors[tf] = None
+            except Exception as exc:  # noqa: BLE001
+                live_adapters[tf] = None
+                live_adapter_errors[tf] = str(exc)
+        else:
+            live_adapters[tf] = None
+            live_adapter_errors[tf] = None
+
     items = repo.list_asset_controls(
         symbols=cfg.symbols,
+        timeframes=requested_timeframes,
         default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
         default_execution_mode="sim",
         default_trade_side="long_only",
@@ -286,6 +307,8 @@ def list_asset_controls(
 
     out: list[AssetControlOut] = []
     for item in items:
+        requested_timeframe = item.timeframe
+        runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
         risk = repo.current_open_risk_usd(
             symbol=item.symbol,
             venue=cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock",
@@ -297,6 +320,8 @@ def list_asset_controls(
         simple_params = simple_5m_resolver.for_symbol(item.symbol)
         live_balance = None
         if item.execution_mode == "live":
+            live_adapter = live_adapters.get(requested_timeframe)
+            live_adapter_error = live_adapter_errors.get(requested_timeframe)
             if live_adapter is not None:
                 try:
                     live_balance = _live_balance_snapshot(
@@ -404,12 +429,15 @@ def list_asset_controls(
 def update_asset_control(
     symbol: str,
     payload: AssetControlUpdate,
+    timeframe: str = Query(...),
     _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
     if symbol not in cfg.symbols:
         raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
+    if timeframe not in _control_plane_timeframes(cfg):
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe}")
 
     mode = payload.execution_mode
     if mode is not None:
@@ -420,6 +448,7 @@ def update_asset_control(
 
     item = repo.update_asset_control(
         symbol=symbol,
+        timeframe=timeframe,
         default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
         enabled=payload.enabled,
         execution_mode=mode,
@@ -427,7 +456,7 @@ def update_asset_control(
         soft_risk_limit_usd=payload.soft_risk_limit_usd,
     )
 
-    requested_timeframe = cfg.trading.runtime_timeframe
+    requested_timeframe = timeframe
     runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
     resolver = AssetParamResolver(cfg)
     params = resolver.for_symbol(item.symbol)
@@ -597,15 +626,17 @@ def value_balance_asset(
 @router.get("/control-plane/assets/{symbol:path}/logs", response_model=list[AssetEngineLogOut])
 def list_asset_logs(
     symbol: str,
+    timeframe: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=2000),
     _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
-    rows = repo.list_asset_logs(symbol=symbol, limit=limit)
+    rows = repo.list_asset_logs(symbol=symbol, timeframe=timeframe, limit=limit)
     return [
         AssetEngineLogOut(
             id=item.id,
             symbol=item.symbol,
+            timeframe=item.timeframe,
             state=item.state,
             note=item.note,
             created_at=item.created_at,

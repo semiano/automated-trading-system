@@ -136,6 +136,7 @@ class AssetControlUpdate(BaseModel):
 class AssetEngineLogOut(BaseModel):
     id: int
     symbol: str
+    timeframe: str
     state: str
     note: str | None
     created_at: datetime

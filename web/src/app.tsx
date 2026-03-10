@@ -170,15 +170,15 @@ export default function App() {
 
   const symbolStatus = useMemo<Record<string, "stale" | "ok">>(() => {
     const out: Record<string, "stale" | "ok"> = {};
-    for (const row of assetControls) {
+    for (const row of assetControls.filter((r) => r.timeframe === timeframe)) {
       out[row.symbol] = row.last_evaluated_state === "stale_data" || row.last_evaluated_state === "runtime_tf_missing" ? "stale" : "ok";
     }
     return out;
-  }, [assetControls]);
+  }, [assetControls, timeframe]);
 
   const selectedAssetControl = useMemo(
-    () => assetControls.find((row) => row.symbol === symbol),
-    [assetControls, symbol]
+    () => assetControls.find((row) => row.symbol === symbol && row.timeframe === timeframe),
+    [assetControls, symbol, timeframe]
   );
 
   const selectedAssetOpenPositions = useMemo(
@@ -231,7 +231,7 @@ export default function App() {
     const loadPortfolio = async () => {
       const failed: string[] = [];
 
-      await fetchOpenPositions({ venue, timeframe: "1m" })
+      await fetchOpenPositions({ venue })
         .then(setOpenPositions)
         .catch(() => {
           setOpenPositions([]);
@@ -275,7 +275,7 @@ export default function App() {
           setPortfolioInfo(null);
         });
 
-      await fetchAssetControls({ timeframe })
+      await fetchAssetControls()
         .then(setAssetControls)
         .catch(() => {
           setAssetControls([]);
@@ -298,7 +298,7 @@ export default function App() {
     loadPortfolio();
     const timer = window.setInterval(loadPortfolio, 8000);
     return () => window.clearInterval(timer);
-  }, [venue, pnlMode, timeframe]);
+  }, [venue, pnlMode]);
 
   useEffect(() => {
     const loadCatchup = async () => {
@@ -319,7 +319,7 @@ export default function App() {
   }, [venue]);
 
   const refreshAssetControls = async () => {
-    const rows = await fetchAssetControls({ timeframe });
+    const rows = await fetchAssetControls();
     setAssetControls(rows);
   };
 
@@ -333,6 +333,7 @@ export default function App() {
 
   const saveAssetControl = async (payload: {
     symbol: string;
+    timeframe: string;
     enabled?: boolean;
     execution_mode?: "sim" | "live";
     trade_side?: "long_only" | "long_short" | "short_only";
