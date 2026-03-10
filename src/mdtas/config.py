@@ -135,6 +135,90 @@ class TradingConfig(BaseModel):
     per_asset_constraints: dict[str, ExecutionConstraintsConfig] = Field(default_factory=dict)
 
 
+class SimpleEngine5mParamsConfig(BaseModel):
+    bb_length: int = 20
+    bb_stdev: float = 2.0
+    atr_length: int = 14
+    ema_fast: int = 20
+    ema_slow: int = 50
+    bb_entry_deviation: float = 1.05
+    bb_exit_deviation: float = 0.15
+    slope_lookback_bars: int = 3
+    slope_flatten_factor: float = 0.82
+    stop_atr: float = 1.4
+    take_profit_atr: float = 2.2
+    max_hold_bars: int = 60
+
+
+class Trading5mConfig(BaseModel):
+    enabled: bool = True
+    runtime_timeframe: str = "5m"
+    position_size_usd: float = 100.0
+    max_position_notional_usd: float | None = None
+    cooldown_bars_after_exit: int = 3
+    cooldown_bars_after_stop: int = 5
+    max_entries_per_hour: int = 3
+    max_entries_per_day: int = 24
+    min_hold_bars_before_signal_exit: int = 2
+    execution_adapter: Literal["paper", "real"] = "paper"
+    live_trading_enabled: bool = False
+    live_allow_short: bool = True
+    live_max_order_notional_usd: float = 25.0
+    live_allowed_symbols: list[str] = Field(default_factory=list)
+    live_require_explicit_env_ack: bool = True
+    live_ack_env_var_name: str = "MDTAS_ENABLE_LIVE_TRADING"
+    live_ack_env_var_value: str = "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
+    tuned_params_path: str = "artifacts/xrp_engine_v3_5m_best_params.yaml"
+    default_params: SimpleEngine5mParamsConfig = Field(default_factory=SimpleEngine5mParamsConfig)
+    per_asset_params: dict[str, SimpleEngine5mParamsConfig] = Field(default_factory=dict)
+    default_constraints: ExecutionConstraintsConfig = Field(default_factory=ExecutionConstraintsConfig)
+    per_asset_constraints: dict[str, ExecutionConstraintsConfig] = Field(default_factory=dict)
+
+
+class SimpleEngine1mParamsConfig(BaseModel):
+    bb_length: int = 20
+    bb_stdev: float = 2.0
+    atr_length: int = 14
+    ema_fast: int = 20
+    ema_slow: int = 50
+    bb_entry_deviation: float = 1.05
+    bb_exit_deviation: float = 0.15
+    slope_lookback_bars: int = 3
+    slope_flatten_factor: float = 0.82
+    stop_atr: float = 1.4
+    take_profit_atr: float = 2.2
+    max_hold_bars: int = 60
+
+
+class Trading1mConfig(BaseModel):
+    enabled: bool = True
+    runtime_timeframe: str = "1m"
+    position_size_usd: float = 100.0
+    max_position_notional_usd: float | None = None
+    cooldown_bars_after_exit: int = 10
+    cooldown_bars_after_stop: int = 20
+    max_entries_per_hour: int = 12
+    max_entries_per_day: int = 120
+    min_hold_bars_before_signal_exit: int = 3
+    execution_adapter: Literal["paper", "real"] = "paper"
+    live_trading_enabled: bool = False
+    live_allow_short: bool = True
+    live_max_order_notional_usd: float = 25.0
+    live_allowed_symbols: list[str] = Field(default_factory=list)
+    live_require_explicit_env_ack: bool = True
+    live_ack_env_var_name: str = "MDTAS_ENABLE_LIVE_TRADING"
+    live_ack_env_var_value: str = "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
+    tuned_params_path: str = "artifacts/xrp_engine_v3_1m_best_params.yaml"
+    default_params: SimpleEngine1mParamsConfig = Field(default_factory=SimpleEngine1mParamsConfig)
+    per_asset_params: dict[str, SimpleEngine1mParamsConfig] = Field(default_factory=dict)
+    default_constraints: ExecutionConstraintsConfig = Field(default_factory=ExecutionConstraintsConfig)
+    per_asset_constraints: dict[str, ExecutionConstraintsConfig] = Field(default_factory=dict)
+
+
 class AppConfig(BaseModel):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT"])
@@ -145,6 +229,8 @@ class AppConfig(BaseModel):
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
+    trading_1m: Trading1mConfig = Field(default_factory=Trading1mConfig)
+    trading_5m: Trading5mConfig = Field(default_factory=Trading5mConfig)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

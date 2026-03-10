@@ -128,3 +128,123 @@ trading:
       stop_atr: 1.5
       take_profit_atr: 1.2
       max_hold_bars: 120
+
+trading_1m:
+  enabled: true
+  runtime_timeframe: "1m"
+  position_size_usd: 100.0
+  max_position_notional_usd: 50.0
+  cooldown_bars_after_exit: 10
+  cooldown_bars_after_stop: 20
+  max_entries_per_hour: 12
+  max_entries_per_day: 120
+  min_hold_bars_before_signal_exit: 3
+  execution_adapter: "paper"
+  live_trading_enabled: false
+  live_allow_short: true
+  live_max_order_notional_usd: 25.0
+  live_allowed_symbols: []
+  live_require_explicit_env_ack: true
+  live_ack_env_var_name: "MDTAS_ENABLE_LIVE_TRADING"
+  live_ack_env_var_value: "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
+  fee_bps: 0.0
+  slippage_bps: 0.0
+  tuned_params_path: "artifacts/xrp_engine_v3_1m_best_params.yaml"
+  default_constraints:
+    min_notional_usd: 10.0
+    qty_step: 0.1
+    price_tick: 0.0001
+    fee_bps: 0.0
+  per_asset_constraints:
+    XRP/USD:
+      min_notional_usd: 10.0
+      qty_step: 0.1
+      price_tick: 0.0001
+      fee_bps: 0.0
+  default_params:
+    bb_length: 20
+    bb_stdev: 2.0
+    atr_length: 14
+    ema_fast: 20
+    ema_slow: 50
+    bb_entry_deviation: 1.05
+    bb_exit_deviation: 0.15
+    slope_lookback_bars: 3
+    slope_flatten_factor: 0.82
+    stop_atr: 1.4
+    take_profit_atr: 2.2
+    max_hold_bars: 60
+  per_asset_params:
+    XRP/USD:
+      bb_length: 26
+      bb_stdev: 1.8
+      atr_length: 10
+      ema_fast: 28
+      ema_slow: 40
+      bb_entry_deviation: 1.05
+      bb_exit_deviation: 0.15
+      slope_lookback_bars: 5
+      slope_flatten_factor: 0.9
+      stop_atr: 1.4
+      take_profit_atr: 2.0
+      max_hold_bars: 60
+
+trading_5m:
+  enabled: true
+  runtime_timeframe: "5m"
+  position_size_usd: 100.0
+  max_position_notional_usd: 50.0
+  cooldown_bars_after_exit: 3
+  cooldown_bars_after_stop: 5
+  max_entries_per_hour: 3
+  max_entries_per_day: 24
+  min_hold_bars_before_signal_exit: 2
+  execution_adapter: "paper"
+  live_trading_enabled: false
+  live_allow_short: true
+  live_max_order_notional_usd: 25.0
+  live_allowed_symbols: []
+  live_require_explicit_env_ack: true
+  live_ack_env_var_name: "MDTAS_ENABLE_LIVE_TRADING"
+  live_ack_env_var_value: "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
+  fee_bps: 0.0
+  slippage_bps: 0.0
+  tuned_params_path: "artifacts/xrp_engine_v3_5m_best_params.yaml"
+  default_constraints:
+    min_notional_usd: 10.0
+    qty_step: 0.1
+    price_tick: 0.0001
+    fee_bps: 0.0
+  per_asset_constraints:
+    XRP/USD:
+      min_notional_usd: 10.0
+      qty_step: 0.1
+      price_tick: 0.0001
+      fee_bps: 0.0
+  default_params:
+    bb_length: 20
+    bb_stdev: 2.0
+    atr_length: 14
+    ema_fast: 20
+    ema_slow: 50
+    bb_entry_deviation: 1.05
+    bb_exit_deviation: 0.15
+    slope_lookback_bars: 3
+    slope_flatten_factor: 0.82
+    stop_atr: 1.4
+    take_profit_atr: 2.2
+    max_hold_bars: 60
+  per_asset_params:
+    XRP/USD:
+      bb_length: 20
+      bb_stdev: 2.0
+      atr_length: 14
+      ema_fast: 20
+      ema_slow: 50
+      bb_entry_deviation: 1.05
+      bb_exit_deviation: 0.15
+      slope_lookback_bars: 3
+      slope_flatten_factor: 0.82
+      stop_atr: 1.4
+      take_profit_atr: 2.2
+      max_hold_bars: 60

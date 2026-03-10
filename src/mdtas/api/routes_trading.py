@@ -21,7 +21,9 @@ from mdtas.config import get_config
 from mdtas.db.session import get_session
 from mdtas.db.trading_repo import TradingRepository
 from mdtas.trading.execution import CcxtExecutionAdapter, SymbolExecutionConstraints, round_down_to_step
+from mdtas.trading.runtime_1m_simple import Simple1mParamResolver
 from mdtas.trading.runtime import AssetParamResolver
+from mdtas.trading.runtime_5m_simple import Simple5mParamResolver
 
 router = APIRouter(tags=["trading"])
 SYSTEM_TRADER_SYMBOL = "__SYSTEM__/TRADER"
@@ -77,7 +79,7 @@ def _price_from_ticker(ticker: dict) -> float:
     raise HTTPException(status_code=503, detail="No usable market price in ticker")
 
 
-def _build_live_adapter(cfg) -> CcxtExecutionAdapter:
+def _build_live_adapter(cfg, runtime_cfg) -> CcxtExecutionAdapter:
     return CcxtExecutionAdapter(
         venue=cfg.providers.ccxt.venue,
         rate_limit=cfg.providers.ccxt.rate_limit,
@@ -85,18 +87,18 @@ def _build_live_adapter(cfg) -> CcxtExecutionAdapter:
         api_secret=cfg.providers.ccxt.api_secret,
         api_password=cfg.providers.ccxt.api_password,
         sandbox=cfg.providers.ccxt.sandbox,
-        live_trading_enabled=cfg.trading.live_trading_enabled,
-        live_allow_short=cfg.trading.live_allow_short,
-        live_max_order_notional_usd=cfg.trading.live_max_order_notional_usd,
-        live_allowed_symbols=cfg.trading.live_allowed_symbols,
-        live_require_explicit_env_ack=cfg.trading.live_require_explicit_env_ack,
-        live_ack_env_var_name=cfg.trading.live_ack_env_var_name,
-        live_ack_env_var_value=cfg.trading.live_ack_env_var_value,
+        live_trading_enabled=runtime_cfg.live_trading_enabled,
+        live_allow_short=runtime_cfg.live_allow_short,
+        live_max_order_notional_usd=runtime_cfg.live_max_order_notional_usd,
+        live_allowed_symbols=runtime_cfg.live_allowed_symbols,
+        live_require_explicit_env_ack=runtime_cfg.live_require_explicit_env_ack,
+        live_ack_env_var_name=runtime_cfg.live_ack_env_var_name,
+        live_ack_env_var_value=runtime_cfg.live_ack_env_var_value,
     )
 
 
-def _constraints_for_symbol(cfg, symbol: str) -> SymbolExecutionConstraints:
-    c = cfg.trading.per_asset_constraints.get(symbol, cfg.trading.default_constraints)
+def _constraints_for_symbol(runtime_cfg, symbol: str) -> SymbolExecutionConstraints:
+    c = runtime_cfg.per_asset_constraints.get(symbol, runtime_cfg.default_constraints)
     return SymbolExecutionConstraints(
         min_notional_usd=float(c.min_notional_usd),
         qty_step=float(c.qty_step),
@@ -105,7 +107,15 @@ def _constraints_for_symbol(cfg, symbol: str) -> SymbolExecutionConstraints:
     )
 
 
-def _live_balance_snapshot(*, cfg, adapter: CcxtExecutionAdapter, symbol: str, trade_side: str) -> dict[str, float | str | bool]:
+def _runtime_config_for_timeframe(cfg, timeframe: str):
+    if timeframe == cfg.trading_1m.runtime_timeframe:
+        return cfg.trading_1m
+    if timeframe == cfg.trading_5m.runtime_timeframe:
+        return cfg.trading_5m
+    return cfg.trading
+
+
+def _live_balance_snapshot(*, cfg, runtime_cfg, adapter: CcxtExecutionAdapter, symbol: str, trade_side: str) -> dict[str, float | str | bool]:
     base_ccy, quote_ccy = _split_symbol(symbol)
     balance = adapter.exchange.fetch_balance()
     ticker = adapter.exchange.fetch_ticker(symbol)
@@ -118,10 +128,10 @@ def _live_balance_snapshot(*, cfg, adapter: CcxtExecutionAdapter, symbol: str, t
     total_value = base_value + quote_value
     base_ratio = (base_value / total_value) if total_value > 0 else None
 
-    constraints = _constraints_for_symbol(cfg, symbol)
-    target_notional = float(cfg.trading.position_size_usd)
-    if cfg.trading.live_max_order_notional_usd > 0:
-        target_notional = min(target_notional, float(cfg.trading.live_max_order_notional_usd))
+    constraints = _constraints_for_symbol(runtime_cfg, symbol)
+    target_notional = float(runtime_cfg.position_size_usd)
+    if runtime_cfg.live_max_order_notional_usd > 0:
+        target_notional = min(target_notional, float(runtime_cfg.live_max_order_notional_usd))
     required_notional = max(float(constraints.min_notional_usd), target_notional)
     required_base_qty = (required_notional / px) if px > 0 else 0.0
 
@@ -250,16 +260,21 @@ def closed_trades(
 
 @router.get("/control-plane/assets", response_model=list[AssetControlOut])
 def list_asset_controls(
+    timeframe: str | None = Query(default=None),
     _auth: None = Depends(require_write_access),
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
-    resolver = AssetParamResolver(cfg)
+    requested_timeframe = timeframe or cfg.trading.runtime_timeframe
+    runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
+    base_resolver = AssetParamResolver(cfg)
+    simple_1m_resolver = Simple1mParamResolver(cfg)
+    simple_5m_resolver = Simple5mParamResolver(cfg)
     live_adapter: CcxtExecutionAdapter | None = None
     live_adapter_error: str | None = None
-    if cfg.trading.execution_adapter == "real":
+    if runtime_cfg.execution_adapter == "real":
         try:
-            live_adapter = _build_live_adapter(cfg)
+            live_adapter = _build_live_adapter(cfg, runtime_cfg)
         except Exception as exc:  # noqa: BLE001
             live_adapter_error = str(exc)
     items = repo.list_asset_controls(
@@ -274,16 +289,19 @@ def list_asset_controls(
         risk = repo.current_open_risk_usd(
             symbol=item.symbol,
             venue=cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock",
-            timeframe=cfg.trading.runtime_timeframe,
+            timeframe=requested_timeframe,
             execution_mode=item.execution_mode,
         )
-        params = resolver.for_symbol(item.symbol)
+        base_params = base_resolver.for_symbol(item.symbol)
+        simple_1m_params = simple_1m_resolver.for_symbol(item.symbol)
+        simple_params = simple_5m_resolver.for_symbol(item.symbol)
         live_balance = None
         if item.execution_mode == "live":
             if live_adapter is not None:
                 try:
                     live_balance = _live_balance_snapshot(
                         cfg=cfg,
+                        runtime_cfg=runtime_cfg,
                         adapter=live_adapter,
                         symbol=item.symbol,
                         trade_side=item.trade_side,
@@ -292,13 +310,65 @@ def list_asset_controls(
                     live_balance = {"status": "error", "note": str(exc)}
             elif live_adapter_error is not None:
                 live_balance = {"status": "error", "note": live_adapter_error}
+
+        if requested_timeframe == cfg.trading_1m.runtime_timeframe:
+            tuning_params = {
+                "bb_length": simple_1m_params.bb_length,
+                "bb_stdev": simple_1m_params.bb_stdev,
+                "atr_length": simple_1m_params.atr_length,
+                "ema_fast": simple_1m_params.ema_fast,
+                "ema_slow": simple_1m_params.ema_slow,
+                "bb_entry_deviation": simple_1m_params.bb_entry_deviation,
+                "bb_exit_deviation": simple_1m_params.bb_exit_deviation,
+                "slope_lookback_bars": simple_1m_params.slope_lookback_bars,
+                "slope_flatten_factor": simple_1m_params.slope_flatten_factor,
+                "stop_atr": simple_1m_params.stop_atr,
+                "take_profit_atr": simple_1m_params.take_profit_atr,
+                "max_hold_bars": simple_1m_params.max_hold_bars,
+                "min_hold_bars_before_signal_exit": cfg.trading_1m.min_hold_bars_before_signal_exit,
+            }
+            bb_entry_mode = "range_revert"
+        elif requested_timeframe == cfg.trading_5m.runtime_timeframe:
+            tuning_params = {
+                "bb_length": simple_params.bb_length,
+                "bb_stdev": simple_params.bb_stdev,
+                "atr_length": simple_params.atr_length,
+                "ema_fast": simple_params.ema_fast,
+                "ema_slow": simple_params.ema_slow,
+                "bb_entry_deviation": simple_params.bb_entry_deviation,
+                "bb_exit_deviation": simple_params.bb_exit_deviation,
+                "slope_lookback_bars": simple_params.slope_lookback_bars,
+                "slope_flatten_factor": simple_params.slope_flatten_factor,
+                "stop_atr": simple_params.stop_atr,
+                "take_profit_atr": simple_params.take_profit_atr,
+                "max_hold_bars": simple_params.max_hold_bars,
+                "min_hold_bars_before_signal_exit": cfg.trading_5m.min_hold_bars_before_signal_exit,
+            }
+            bb_entry_mode = "range_revert"
+        else:
+            tuning_params = {
+                "rsi_length": base_params.rsi_length,
+                "atr_length": base_params.atr_length,
+                "ema_fast": base_params.ema_fast,
+                "ema_slow": base_params.ema_slow,
+                "rsi_entry": base_params.rsi_entry,
+                "rsi_exit": base_params.rsi_exit,
+                "stop_atr": base_params.stop_atr,
+                "take_profit_atr": base_params.take_profit_atr,
+                "max_hold_bars": base_params.max_hold_bars,
+                "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
+                "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
+            }
+            bb_entry_mode = cfg.trading.bb_entry_mode
+
         out.append(
             AssetControlOut(
                 symbol=item.symbol,
+                timeframe=requested_timeframe,
                 enabled=bool(item.enabled),
                 execution_mode=item.execution_mode,
                 trade_side=item.trade_side,
-                bb_entry_mode=cfg.trading.bb_entry_mode,
+                bb_entry_mode=bb_entry_mode,
                 soft_risk_limit_usd=float(item.soft_risk_limit_usd),
                 current_risk_usd=float(risk),
                 last_run_ts=item.last_run_ts,
@@ -306,19 +376,7 @@ def list_asset_controls(
                 last_evaluated_state=item.last_evaluated_state,
                 last_evaluated_note=item.last_evaluated_note,
                 live_balance=live_balance,
-                tuning_params={
-                    "rsi_length": params.rsi_length,
-                    "atr_length": params.atr_length,
-                    "ema_fast": params.ema_fast,
-                    "ema_slow": params.ema_slow,
-                    "rsi_entry": params.rsi_entry,
-                    "rsi_exit": params.rsi_exit,
-                    "stop_atr": params.stop_atr,
-                    "take_profit_atr": params.take_profit_atr,
-                    "max_hold_bars": params.max_hold_bars,
-                    "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
-                    "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
-                },
+                tuning_params=tuning_params,
             )
         )
     return out
@@ -351,6 +409,8 @@ def update_asset_control(
         soft_risk_limit_usd=payload.soft_risk_limit_usd,
     )
 
+    requested_timeframe = cfg.trading.runtime_timeframe
+    runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
     resolver = AssetParamResolver(cfg)
     params = resolver.for_symbol(item.symbol)
     live_balance = None
@@ -358,7 +418,8 @@ def update_asset_control(
         try:
             live_balance = _live_balance_snapshot(
                 cfg=cfg,
-                adapter=_build_live_adapter(cfg),
+                runtime_cfg=runtime_cfg,
+                adapter=_build_live_adapter(cfg, runtime_cfg),
                 symbol=item.symbol,
                 trade_side=item.trade_side,
             )
@@ -373,6 +434,7 @@ def update_asset_control(
 
     return AssetControlOut(
         symbol=item.symbol,
+        timeframe=requested_timeframe,
         enabled=bool(item.enabled),
         execution_mode=item.execution_mode,
         trade_side=item.trade_side,

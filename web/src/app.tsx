@@ -59,6 +59,16 @@ function normalizeIndicatorRows(rows: IndicatorRow[]): IndicatorRow[] {
   return deduped;
 }
 
+function mergeClosedTradesByTimeframe(parts: ClosedTrade[][]): ClosedTrade[] {
+  const byId = new Map<number, ClosedTrade>();
+  for (const group of parts) {
+    for (const row of group) {
+      byId.set(row.id, row);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => Date.parse(b.exit_ts) - Date.parse(a.exit_ts));
+}
+
 export default function App() {
   const {
     symbol,
@@ -95,6 +105,12 @@ export default function App() {
   const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
   const [catchupError, setCatchupError] = useState<string | null>(null);
   const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
+  const [pendingTradeFocus, setPendingTradeFocus] = useState<{
+    symbol: string;
+    timeframe: string;
+    entryTs: string;
+    exitTs: string;
+  } | null>(null);
 
   const { chartRows, chartDataCap } = useMemo((): { chartRows: IndicatorRow[]; chartDataCap: ChartDataCapInfo | null } => {
     const capLimit = chartPointLimitForTimeframe(timeframe);
@@ -177,7 +193,12 @@ export default function App() {
   }, [rangeDays]);
 
   const indicatorsArg = useMemo(
-    () =>
+    () => {
+      const tuning = selectedAssetControl?.tuning_params ?? {};
+      const emaFastLen = typeof tuning.ema_fast === "number" ? tuning.ema_fast : undefined;
+      const emaSlowLen = typeof tuning.ema_slow === "number" ? tuning.ema_slow : undefined;
+      const isSimpleEngineTf = timeframe === "1m" || timeframe === "5m";
+      return (
       buildIndicatorsArg({
         bbands: overlays.bbands,
         ema20: overlays.ema20,
@@ -186,8 +207,13 @@ export default function App() {
         rsi: panels.rsi,
         atr: panels.atr,
         bbWidth: panels.bbWidth,
-      }),
-    [overlays, panels]
+        forceSimpleMechanics: isSimpleEngineTf,
+        emaFastLen,
+        emaSlowLen,
+      })
+      );
+    },
+    [overlays, panels, timeframe, selectedAssetControl]
   );
 
   useEffect(() => {
@@ -212,22 +238,25 @@ export default function App() {
           failed.push("open positions");
         });
 
-      await fetchClosedTrades({ venue, timeframe: "1m", execution_mode: pnlMode, limit: 1000 })
-        .then(async (payload) => {
-          setClosedTrades(payload.rows);
-          setTotalNetPnl(payload.total_net_pnl);
+      await Promise.all([
+        fetchClosedTrades({ venue, timeframe: "1m", execution_mode: pnlMode, limit: 1000 }),
+        fetchClosedTrades({ venue, timeframe: "5m", execution_mode: pnlMode, limit: 1000 }),
+      ])
+        .then(async ([pnl1m, pnl5m]) => {
+          const merged = mergeClosedTradesByTimeframe([pnl1m.rows, pnl5m.rows]);
+          setClosedTrades(merged);
+          setTotalNetPnl(merged.reduce((sum, row) => sum + row.net_pnl, 0));
 
-          if (pnlMode === "live" && payload.rows.length === 0) {
+          if (pnlMode === "live" && merged.length === 0) {
             try {
-              const simPayload = await fetchClosedTrades({
-                venue,
-                timeframe: "1m",
-                execution_mode: "sim",
-                limit: 1000,
-              });
-              if (simPayload.rows.length > 0) {
+              const [sim1m, sim5m] = await Promise.all([
+                fetchClosedTrades({ venue, timeframe: "1m", execution_mode: "sim", limit: 1000 }),
+                fetchClosedTrades({ venue, timeframe: "5m", execution_mode: "sim", limit: 1000 }),
+              ]);
+              const simMerged = mergeClosedTradesByTimeframe([sim1m.rows, sim5m.rows]);
+              if (simMerged.length > 0) {
                 setPortfolioInfo(
-                  `No closed trades in live mode. ${simPayload.rows.length} closed trade(s) exist in sim mode.`
+                  `No closed trades in live mode. ${simMerged.length} closed trade(s) exist in sim mode (1m + 5m).`
                 );
               } else {
                 setPortfolioInfo(null);
@@ -246,7 +275,7 @@ export default function App() {
           setPortfolioInfo(null);
         });
 
-      await fetchAssetControls()
+      await fetchAssetControls({ timeframe })
         .then(setAssetControls)
         .catch(() => {
           setAssetControls([]);
@@ -269,7 +298,7 @@ export default function App() {
     loadPortfolio();
     const timer = window.setInterval(loadPortfolio, 8000);
     return () => window.clearInterval(timer);
-  }, [venue, pnlMode]);
+  }, [venue, pnlMode, timeframe]);
 
   useEffect(() => {
     const loadCatchup = async () => {
@@ -290,7 +319,7 @@ export default function App() {
   }, [venue]);
 
   const refreshAssetControls = async () => {
-    const rows = await fetchAssetControls();
+    const rows = await fetchAssetControls({ timeframe });
     setAssetControls(rows);
   };
 
@@ -320,6 +349,27 @@ export default function App() {
   }) => {
     await valueBalanceAsset(payload);
     await refreshAssetControls();
+  };
+
+  const handleGoToTradeChart = (trade: ClosedTrade) => {
+    const tf = trade.timeframe;
+    const tfMinutes = tf.endsWith("m") ? Number(tf.slice(0, -1)) : tf.endsWith("h") ? Number(tf.slice(0, -1)) * 60 : tf.endsWith("d") ? Number(tf.slice(0, -1)) * 1440 : 5;
+    const bufferBars = 24;
+    const bufferMs = Math.max(1, tfMinutes) * 60 * 1000 * bufferBars;
+    const entryMs = Date.parse(trade.entry_ts);
+    const earliestMs = Number.isFinite(entryMs) ? Math.max(0, entryMs - bufferMs) : Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const days = Math.max(1, Math.ceil((Date.now() - earliestMs) / (24 * 60 * 60 * 1000)));
+
+    setSymbol(trade.symbol);
+    setTimeframe(tf);
+    setRangeDays(days);
+    setView("chart");
+    setPendingTradeFocus({
+      symbol: trade.symbol,
+      timeframe: tf,
+      entryTs: trade.entry_ts,
+      exitTs: trade.exit_ts,
+    });
   };
 
   useEffect(() => {
@@ -360,6 +410,36 @@ export default function App() {
       .then((payload) => setChartClosedTrades(payload.rows))
       .catch(() => setChartClosedTrades([]));
   }, [symbol, timeframe, venue, timeRange.start, timeRange.end, indicatorsArg, isSelectedSymbolActive]);
+
+  useEffect(() => {
+    if (!pendingTradeFocus || rows.length === 0) {
+      return;
+    }
+    if (symbol !== pendingTradeFocus.symbol || timeframe !== pendingTradeFocus.timeframe) {
+      return;
+    }
+
+    const entryMs = parseApiTsMillis(pendingTradeFocus.entryTs);
+    const exitMs = parseApiTsMillis(pendingTradeFocus.exitTs);
+    const targetMs = Number.isFinite(entryMs) && Number.isFinite(exitMs) ? (entryMs + exitMs) / 2 : Number.isFinite(exitMs) ? exitMs : entryMs;
+    if (!Number.isFinite(targetMs)) {
+      setPendingTradeFocus(null);
+      return;
+    }
+
+    let bestRow = rows[0];
+    let bestDist = Math.abs(parseApiTsMillis(bestRow.ts) - targetMs);
+    for (const row of rows) {
+      const dist = Math.abs(parseApiTsMillis(row.ts) - targetMs);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestRow = row;
+      }
+    }
+
+    setCrosshair(bestRow);
+    setPendingTradeFocus(null);
+  }, [pendingTradeFocus, rows, symbol, timeframe]);
 
   return (
     <div>
@@ -411,6 +491,7 @@ export default function App() {
             <label><input type="checkbox" checked={panels.volumeProfile} onChange={() => togglePanel("volumeProfile")} /> Volume Profile</label>
           </div>
           <ChartLayout
+            timeframe={timeframe}
             rows={chartRows}
             gaps={chartGaps}
             overlays={overlays}
@@ -435,6 +516,7 @@ export default function App() {
           onSaveAssetControl={saveAssetControl}
           onValueBalanceAsset={rebalanceAssetValue}
           onSaveRiskPolicy={saveRiskPolicy}
+          onGoToTradeChart={handleGoToTradeChart}
         />
       ) : (
         <IngestionStatusPage rows={catchupRows} error={catchupError} updatedAt={catchupUpdatedAt} />

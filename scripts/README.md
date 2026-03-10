@@ -75,6 +75,10 @@ Use these first in day-to-day workflow.
 - `tune_xrp_engine_v2.py`
   - Engine v2-oriented tuning workflow.
 
+- `timeboxed_optimize_xrp_engine_v3_5m.py`
+  - Runs a 20-minute timeboxed optimizer for the new simple 5m XRP engine.
+  - Writes best params to `artifacts/xrp_engine_v3_5m_best_params.yaml`.
+
 - `live_ops_smoke.py`, `real_roundtrip_smoke.py`, `real_short_smoke.py`
   - Operational/probe scripts for specific runtime smoke scenarios.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import urllib.parse
 import urllib.request
@@ -24,7 +25,11 @@ def fetch(timeframe: str, days: int) -> list[dict]:
         "limit": 200000,
     }
     url = BASE + "?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url, timeout=90) as response:
+    request = urllib.request.Request(url)
+    token = os.getenv("MDTAS_API_READ_TOKEN") or os.getenv("MDTAS_API_WRITE_TOKEN")
+    if token:
+        request.add_header("X-API-Key", token)
+    with urllib.request.urlopen(request, timeout=90) as response:
         return json.loads(response.read().decode())
 
 
@@ -52,9 +57,10 @@ def main() -> None:
     )
 
     rows_1m = fetch("1m", 45)
+    rows_5m = fetch("5m", 180)
     rows_1h = fetch("1h", 180)
 
-    for timeframe, rows in (("1m", rows_1m), ("1h", rows_1h)):
+    for timeframe, rows in (("1m", rows_1m), ("5m", rows_5m), ("1h", rows_1h)):
         cur.executemany(
             "INSERT INTO candles (ts, open, high, low, close, volume, symbol, venue, timeframe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
@@ -75,7 +81,7 @@ def main() -> None:
     con.commit()
 
     summary = {}
-    for timeframe in ("1m", "1h"):
+    for timeframe in ("1m", "5m", "1h"):
         count, min_ts, max_ts = cur.execute(
             "SELECT count(*), min(ts), max(ts) FROM candles WHERE timeframe=?",
             (timeframe,),

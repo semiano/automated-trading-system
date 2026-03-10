@@ -6,6 +6,7 @@ Set-Location $root
 $patterns = @(
     "*uvicorn mdtas.api.app:app*",
     "*-m mdtas_worker*",
+    "*-m mdtas_worker_5m*",
     "*vite*",
     "*npm --prefix web run dev*"
 )

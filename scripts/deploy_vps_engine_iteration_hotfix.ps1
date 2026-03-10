@@ -76,11 +76,16 @@ $files = @(
     "src/mdtas/config.py",
     "src/mdtas/trading/execution.py",
     "src/mdtas/trading/runtime.py",
+    "src/mdtas/trading/runtime_1m_simple.py",
+    "src/mdtas/trading/runtime_5m_simple.py",
     "src/mdtas/api/auth.py",
     "src/mdtas/api/app.py",
     "src/mdtas/api/routes_features.py",
     "src/mdtas/api/schemas.py",
     "src/mdtas/api/routes_trading.py",
+    "src/services/trader_5m_main.py",
+    "src/services/trader_main.py",
+    "src/mdtas_worker_5m.py",
     "web/src/components/CandleChart.tsx",
     "web/src/components/IndicatorPanels.tsx",
     "web/src/components/ChartLayout.tsx",
@@ -125,10 +130,10 @@ fi
 # Remove stale TypeScript emit artifacts that can shadow .ts sources in Vite.
 rm -f web/src/api/client.js web/src/api/types.js
 
-docker compose --env-file .env.docker up -d --build api trader web
+docker compose --env-file .env.docker up -d --build api trader trader_5m web
 
 echo "=== service status ==="
-docker compose --env-file .env.docker ps api trader web
+docker compose --env-file .env.docker ps api trader trader_5m web
 '@ | Set-Content -Path $remoteScript -NoNewline
 
 try {

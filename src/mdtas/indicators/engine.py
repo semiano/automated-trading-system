@@ -38,7 +38,13 @@ def compute(
     if "atr" in req:
         out["atr"] = compute_atr(out, length=int(params.get("atr", {}).get("length", 14)))
 
-    ema_lengths = params.get("ema_lengths", [20, 50, 200])
+    ema_lengths = list(params.get("ema_lengths", [20, 50, 200]))
+    requested_ema_lengths: set[int] = set()
+    for name in req:
+        if name.startswith("ema") and len(name) > 3 and name[3:].isdigit():
+            requested_ema_lengths.add(int(name[3:]))
+    if requested_ema_lengths:
+        ema_lengths = sorted(set(int(length) for length in ema_lengths).union(requested_ema_lengths))
     for length in ema_lengths:
         key = f"ema{length}"
         if "ema" in req or key in req:

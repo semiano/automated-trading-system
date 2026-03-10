@@ -121,8 +121,8 @@ export async function fetchClosedTrades(args: {
   return (await response.json()) as ClosedTradesResponse;
 }
 
-export async function fetchAssetControls(): Promise<AssetControl[]> {
-  const response = await fetch(`${BASE}/control-plane/assets`, withApiKey("write"));
+export async function fetchAssetControls(args: { timeframe?: string } = {}): Promise<AssetControl[]> {
+  const response = await fetch(`${BASE}/control-plane/assets?${qs(args)}`, withApiKey("write"));
   if (!response.ok) throw new Error("Failed to fetch asset controls");
   return (await response.json()) as AssetControl[];
 }

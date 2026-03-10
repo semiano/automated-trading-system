@@ -111,6 +111,7 @@ class RiskPolicyUpdate(BaseModel):
 
 class AssetControlOut(BaseModel):
     symbol: str
+    timeframe: str
     enabled: bool
     execution_mode: str
     trade_side: str

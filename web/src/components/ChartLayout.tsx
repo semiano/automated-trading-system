@@ -14,6 +14,7 @@ type TradeMarker = {
 };
 
 type Props = {
+  timeframe: string;
   rows: IndicatorRow[];
   gaps: Gap[];
   overlays: { bbands: boolean; ema20: boolean; ema50: boolean; ema200: boolean };
@@ -44,85 +45,99 @@ type EntryConditionState = {
   all: boolean | null;
 };
 
-type BinaryLane = {
+type CloseConditionState = {
+  rsi: boolean | null;
+  trend: boolean | null;
+  signal: boolean | null;
+  holdGate: boolean | null;
+  stopHit: boolean | null;
+  takeProfitHit: boolean | null;
+  timedExit: boolean | null;
+  all: boolean | null;
+};
+
+type ThresholdSliderMetric = {
   key: string;
   label: string;
   color: string;
-  values: number[];
-  current: boolean | null;
-  dash?: string;
+  value: number | null;
+  threshold: number | null;
+  min: number;
+  max: number;
+  pass: boolean | null;
+  valueText: string;
+  thresholdText: string;
 };
 
-type BinarySubplotProps = {
+type ThresholdSlidersProps = {
   title: string;
-  lanes: BinaryLane[];
+  metrics: ThresholdSliderMetric[];
   sideEnabled: boolean;
 };
 
-function BinarySubplot({ title, lanes, sideEnabled }: BinarySubplotProps) {
-  const pointCount = lanes[0]?.values.length ?? 0;
-  const chartWidth = Math.max(260, pointCount * 4);
-  const chartHeight = 56;
+function ThresholdSliders({ title, metrics, sideEnabled }: ThresholdSlidersProps) {
+  const sliderHeight = 122;
 
-  const pointsFor = (values: number[]): string => {
-    if (values.length === 0) {
-      return "";
-    }
-    const high = 12;
-    const low = chartHeight - 12;
-    return values
-      .map((v, i) => {
-        const x = values.length === 1 ? 0 : (i * (chartWidth - 1)) / (values.length - 1);
-        const y = v === 1 ? high : low;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-      })
-      .join(" ");
-  };
-
-  const currentText = (value: boolean | null): string => {
-    if (!sideEnabled) {
-      return "inactive";
-    }
-    if (value === null) {
-      return "n/a";
-    }
-    return value ? "1" : "0";
+  const toPct = (value: number, min: number, max: number): number => {
+    const span = Math.max(max - min, 1e-9);
+    const normalized = (value - min) / span;
+    return Math.min(1, Math.max(0, normalized));
   };
 
   return (
     <div style={{ border: "1px solid #2b3442", borderRadius: 8, background: "#0f1520", padding: "8px 10px", minWidth: 280 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <div style={{ fontSize: 12, color: "#dbe6f5", fontWeight: 600 }}>{title}</div>
-        <div style={{ fontSize: 10, color: sideEnabled ? "#9ca3af" : "#ef4444" }}>
-          {sideEnabled ? "active" : "inactive"}
-        </div>
+        <div style={{ fontSize: 10, color: sideEnabled ? "#9ca3af" : "#ef4444" }}>{sideEnabled ? "active" : "inactive"}</div>
       </div>
-      <div style={{ marginBottom: 6 }}>
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} style={{ width: "100%", height: chartHeight, background: "#0b111b", borderRadius: 4 }}>
-          <line x1={0} y1={12} x2={chartWidth} y2={12} stroke="#1f2a3a" strokeWidth={1} />
-          <line x1={0} y1={chartHeight - 12} x2={chartWidth} y2={chartHeight - 12} stroke="#1f2a3a" strokeWidth={1} />
-          {lanes.map((lane) => (
-            <polyline
-              key={lane.key}
-              fill="none"
-              stroke={lane.color}
-              strokeWidth={lane.key === "all" ? 2.4 : 1.8}
-              strokeDasharray={lane.dash}
-              points={pointsFor(lane.values)}
-              opacity={sideEnabled ? 1 : 0.45}
-            />
-          ))}
-        </svg>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        {metrics.map((metric) => {
+          const valuePct = metric.value === null ? null : toPct(metric.value, metric.min, metric.max);
+          const thresholdPct = metric.threshold === null ? null : toPct(metric.threshold, metric.min, metric.max);
+          const statusColor = metric.pass === null ? "#94a3b8" : metric.pass ? "#22c55e" : "#ef4444";
+          return (
+            <div key={`${title}-${metric.key}`} style={{ width: 86, textAlign: "center", opacity: sideEnabled ? 1 : 0.5 }}>
+              <div style={{ fontSize: 10, color: "#cbd5e1", marginBottom: 4 }}>{metric.label}</div>
+              <div style={{ height: sliderHeight, position: "relative", margin: "0 auto", width: 16, borderRadius: 10, background: "#101827", border: "1px solid #334155" }}>
+                {thresholdPct !== null ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: -10,
+                      right: -10,
+                      bottom: `${thresholdPct * (sliderHeight - 2)}px`,
+                      height: 2,
+                      background: "#f59e0b",
+                    }}
+                  />
+                ) : null}
+                {valuePct !== null ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: -3,
+                      width: 22,
+                      bottom: `${valuePct * (sliderHeight - 2) - 5}px`,
+                      height: 10,
+                      borderRadius: 6,
+                      background: metric.color,
+                      boxShadow: `0 0 0 1px ${metric.color}`,
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 10, color: "#9ca3af" }}>cur {metric.valueText}</div>
+              <div style={{ fontSize: 10, color: "#9ca3af" }}>thr {metric.thresholdText}</div>
+              <div style={{ marginTop: 2, fontSize: 10, color: statusColor }}>
+                {metric.pass === null ? "n/a" : metric.pass ? "pass" : "block"}
+              </div>
+            </div>
+          );
+        })}
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {lanes.map((lane) => (
-          <div key={`${lane.key}-legend`} style={{ fontSize: 10, color: "#cbd5e1", display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ color: lane.color }}>{lane.label}</span>
-            <span>{currentText(lane.current)}</span>
-          </div>
-        ))}
+      <div style={{ marginTop: 6, fontSize: 10, color: "#93a3b8" }}>
+        Yellow line = trigger threshold. Colored handle = current value at cursor/live bar.
       </div>
-      <div style={{ marginTop: 6, fontSize: 10, color: "#93a3b8" }}>`ALL=1` means entry signal conditions were fully met on that bar.</div>
     </div>
   );
 }
@@ -135,6 +150,14 @@ function getEmaFastValue(row: IndicatorRow | null | undefined, emaFast: number |
   return typeof value === "number" ? value : null;
 }
 
+function getEmaValue(row: IndicatorRow | null | undefined, length: number | undefined): number | null {
+  if (!row || length === undefined) {
+    return null;
+  }
+  const value = (row as unknown as Record<string, number | null | undefined>)[`ema${length}`];
+  return typeof value === "number" ? value : null;
+}
+
 function allTrue(values: Array<boolean | null>): boolean | null {
   if (values.some((v) => v === null)) {
     return null;
@@ -142,7 +165,71 @@ function allTrue(values: Array<boolean | null>): boolean | null {
   return values.every((v) => v === true);
 }
 
-export default function ChartLayout({ rows, gaps, overlays, panels, openPositions, closedTrades, assetControl, crosshair, setCrosshair, chartDataCap }: Props) {
+function computeBbMetric(
+  side: "long" | "short",
+  bbMode: string,
+  closeValue: number | null,
+  bbLowerValue: number | null,
+  bbUpperValue: number | null,
+  thresholdPct: number | undefined
+): { value: number | null; threshold: number | null; pass: boolean | null; valueText: string; thresholdText: string; min: number; max: number } {
+  if (bbMode === "off") {
+    return {
+      value: 0,
+      threshold: 0,
+      pass: true,
+      valueText: "off",
+      thresholdText: "off",
+      min: -1,
+      max: 1,
+    };
+  }
+
+  if (closeValue === null) {
+    return { value: null, threshold: 0, pass: null, valueText: "n/a", thresholdText: "0", min: -1, max: 1 };
+  }
+
+  if (bbMode === "touch_revert") {
+    if (bbLowerValue === null || bbUpperValue === null) {
+      return { value: null, threshold: 0, pass: null, valueText: "n/a", thresholdText: "0", min: -1, max: 1 };
+    }
+    const dist = side === "long" ? closeValue - bbLowerValue : bbUpperValue - closeValue;
+    return {
+      value: dist,
+      threshold: 0,
+      pass: dist <= 0,
+      valueText: num(dist, 5),
+      thresholdText: "0",
+      min: -0.02,
+      max: 0.02,
+    };
+  }
+
+  if (bbLowerValue === null || bbUpperValue === null) {
+    return { value: null, threshold: 0, pass: null, valueText: "n/a", thresholdText: "0", min: -1, max: 1 };
+  }
+
+  const range = bbUpperValue - bbLowerValue;
+  if (range <= 0) {
+    return { value: null, threshold: 0, pass: null, valueText: "n/a", thresholdText: "0", min: -1, max: 1 };
+  }
+
+  const threshold = thresholdPct ?? 0.8;
+  const cutoff = side === "long" ? bbLowerValue + threshold * range : bbUpperValue - threshold * range;
+  const dist = side === "long" ? closeValue - cutoff : cutoff - closeValue;
+
+  return {
+    value: dist,
+    threshold: 0,
+    pass: dist <= 0,
+    valueText: num(dist, 5),
+    thresholdText: "0",
+    min: -0.03,
+    max: 0.03,
+  };
+}
+
+export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, openPositions, closedTrades, assetControl, crosshair, setCrosshair, chartDataCap }: Props) {
   const profile = useMemo(() => buildVolumeProfile(rows), [rows]);
   const row = crosshair ?? rows[rows.length - 1] ?? null;
   const rowIndex = row ? rows.findIndex((r) => r.ts === row.ts) : -1;
@@ -196,24 +283,8 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
           : closeValue < emaValue
         : null;
 
-    let bbPass: boolean | null = null;
-    if (bbMode === "off") {
-      bbPass = true;
-    } else if (bbMode === "touch_revert") {
-      const bbBound = side === "long" ? prevRow.bb_lower ?? null : prevRow.bb_upper ?? null;
-      if (closeValue !== null && bbBound !== null) {
-        bbPass = side === "long" ? closeValue <= bbBound : closeValue >= bbBound;
-      }
-    } else if (bbMode === "range_revert") {
-      const lower = prevRow.bb_lower ?? null;
-      const upper = prevRow.bb_upper ?? null;
-      if (closeValue !== null && lower !== null && upper !== null && upper > lower) {
-        const threshold = bbThreshold ?? 0.8;
-        const range = upper - lower;
-        const cutoff = side === "long" ? lower + threshold * range : upper - threshold * range;
-        bbPass = side === "long" ? closeValue <= cutoff : closeValue >= cutoff;
-      }
-    }
+    const bbMetric = computeBbMetric(side, bbMode, closeValue, prevRow.bb_lower ?? null, prevRow.bb_upper ?? null, bbThreshold);
+    const bbPass = bbMetric.pass;
 
     const momentumPass = momentumEnabled
       ? side === "long"
@@ -233,49 +304,520 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
   const currentLong = evaluateEntryState(evalRow, "long");
   const currentShort = evaluateEntryState(evalRow, "short");
 
-  const conditionSeries = useMemo(() => {
-    const start = Math.max(1, rows.length - 120);
-    const toBit = (v: boolean | null): number => (v === true ? 1 : 0);
+  const activeLongPosition = useMemo(
+    () => openPositions.filter((p) => p.trade_side === "long").sort((a, b) => Date.parse(b.entry_ts) - Date.parse(a.entry_ts))[0],
+    [openPositions]
+  );
+  const activeShortPosition = useMemo(
+    () => openPositions.filter((p) => p.trade_side === "short").sort((a, b) => Date.parse(b.entry_ts) - Date.parse(a.entry_ts))[0],
+    [openPositions]
+  );
 
-    const longLanes: BinaryLane[] = [
-      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentLong.rsi, dash: "" },
-      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentLong.trend, dash: "6 3" },
-      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentLong.bb, dash: "2 3" },
-      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentLong.momentum, dash: "10 3 2 3" },
-      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentLong.volatility, dash: "1 3" },
-      { key: "all", label: "ALL", color: "#22c55e", values: [], current: currentLong.all, dash: "" },
-    ];
-    const shortLanes: BinaryLane[] = [
-      { key: "rsi", label: "RSI", color: "#38bdf8", values: [], current: currentShort.rsi, dash: "" },
-      { key: "trend", label: "Trend", color: "#f59e0b", values: [], current: currentShort.trend, dash: "6 3" },
-      { key: "bb", label: "BB", color: "#a78bfa", values: [], current: currentShort.bb, dash: "2 3" },
-      { key: "momentum", label: "Mom", color: "#34d399", values: [], current: currentShort.momentum, dash: "10 3 2 3" },
-      { key: "volatility", label: "Vol", color: "#f472b6", values: [], current: currentShort.volatility, dash: "1 3" },
-      { key: "all", label: "ALL", color: "#ef4444", values: [], current: currentShort.all, dash: "" },
-    ];
-
-    for (let i = start; i < rows.length; i += 1) {
-      const prevRow = rows[i - 1];
-      const longState = evaluateEntryState(prevRow, "long");
-      const shortState = evaluateEntryState(prevRow, "short");
-
-      longLanes[0].values.push(toBit(longState.rsi));
-      longLanes[1].values.push(toBit(longState.trend));
-      longLanes[2].values.push(toBit(longState.bb));
-      longLanes[3].values.push(toBit(longState.momentum));
-      longLanes[4].values.push(toBit(longState.volatility));
-      longLanes[5].values.push(toBit(longState.all));
-
-      shortLanes[0].values.push(toBit(shortState.rsi));
-      shortLanes[1].values.push(toBit(shortState.trend));
-      shortLanes[2].values.push(toBit(shortState.bb));
-      shortLanes[3].values.push(toBit(shortState.momentum));
-      shortLanes[4].values.push(toBit(shortState.volatility));
-      shortLanes[5].values.push(toBit(shortState.all));
+  const evaluateCloseState = (side: "long" | "short"): CloseConditionState => {
+    const position = side === "long" ? activeLongPosition : activeShortPosition;
+    if (!evalRow) {
+      return {
+        rsi: null,
+        trend: null,
+        signal: null,
+        holdGate: null,
+        stopHit: null,
+        takeProfitHit: null,
+        timedExit: null,
+        all: null,
+      };
     }
 
-    return { longLanes, shortLanes };
-  }, [rows, currentLong.rsi, currentLong.trend, currentLong.bb, currentLong.momentum, currentLong.volatility, currentLong.all, currentShort.rsi, currentShort.trend, currentShort.bb, currentShort.momentum, currentShort.volatility, currentShort.all]);
+    const rsiValue = evalRow.rsi ?? null;
+    const closeValue = evalRow.close ?? null;
+    const emaValue = getEmaFastValue(evalRow, emaFast);
+
+    const rsiPass =
+      rsiValue !== null
+        ? side === "long"
+          ? (rsiExit !== undefined ? rsiValue >= rsiExit : null)
+          : (rsiEntry !== undefined ? rsiValue <= rsiEntry : null)
+        : null;
+
+    const trendPass =
+      closeValue !== null && emaValue !== null
+        ? side === "long"
+          ? closeValue < emaValue
+          : closeValue > emaValue
+        : null;
+
+    const signal =
+      rsiPass === null && trendPass === null
+        ? null
+        : Boolean(rsiPass === true || trendPass === true);
+
+    if (!position) {
+      return {
+        rsi: rsiPass,
+        trend: trendPass,
+        signal,
+        holdGate: null,
+        stopHit: null,
+        takeProfitHit: null,
+        timedExit: null,
+        all: null,
+      };
+    }
+
+    const holdNext = Number(position.hold_bars) + 1;
+    const holdThreshold = Math.max(0, minHoldSignalBars ?? 0);
+    const holdGate = holdNext >= holdThreshold;
+
+    const currentBar = row;
+    const stopHit =
+      currentBar && position.stop_price !== null && position.stop_price !== undefined
+        ? side === "long"
+          ? (currentBar.low ?? Number.POSITIVE_INFINITY) <= position.stop_price
+          : (currentBar.high ?? Number.NEGATIVE_INFINITY) >= position.stop_price
+        : null;
+
+    const takeProfitHit =
+      currentBar && position.take_profit_price !== null && position.take_profit_price !== undefined
+        ? side === "long"
+          ? (currentBar.high ?? Number.NEGATIVE_INFINITY) >= position.take_profit_price
+          : (currentBar.low ?? Number.POSITIVE_INFINITY) <= position.take_profit_price
+        : null;
+
+    const timedExit = maxHoldBars !== undefined ? holdNext >= maxHoldBars : null;
+    const signalActive = signal !== null ? holdGate && signal : null;
+
+    const all =
+      stopHit === null && takeProfitHit === null && timedExit === null && signalActive === null
+        ? null
+        : Boolean(stopHit === true || takeProfitHit === true || timedExit === true || signalActive === true);
+
+    return {
+      rsi: rsiPass,
+      trend: trendPass,
+      signal,
+      holdGate,
+      stopHit,
+      takeProfitHit,
+      timedExit,
+      all,
+    };
+  };
+
+  const currentCloseLong = evaluateCloseState("long");
+  const currentCloseShort = evaluateCloseState("short");
+
+  const longMetrics = useMemo<ThresholdSliderMetric[]>(() => {
+    const rsiValue = evalRow?.rsi ?? null;
+    const trendValue = close !== null && emaFastValue !== null && emaFastValue !== 0 ? ((close - emaFastValue) / emaFastValue) * 100 : null;
+    const bbMetric = computeBbMetric("long", bbMode, close, bbLower, bbUpper, bbThreshold);
+    const atrPctValue = close !== null && evalRow?.atr !== null && evalRow?.atr !== undefined && close > 0
+      ? (evalRow.atr / close) * 100
+      : null;
+    return [
+      {
+        key: "rsi",
+        label: "RSI",
+        color: "#38bdf8",
+        value: rsiValue,
+        threshold: rsiEntry ?? null,
+        min: 0,
+        max: 100,
+        pass: currentLong.rsi,
+        valueText: num(rsiValue, 2),
+        thresholdText: num(rsiEntry, 2),
+      },
+      {
+        key: "trend",
+        label: "Trend %",
+        color: "#f59e0b",
+        value: trendValue,
+        threshold: 0,
+        min: -1.5,
+        max: 1.5,
+        pass: currentLong.trend,
+        valueText: `${num(trendValue, 3)}%`,
+        thresholdText: "0.000%",
+      },
+      {
+        key: "bb",
+        label: "BB Dist",
+        color: "#a78bfa",
+        value: bbMetric.value,
+        threshold: bbMetric.threshold,
+        min: bbMetric.min,
+        max: bbMetric.max,
+        pass: currentLong.bb,
+        valueText: bbMetric.valueText,
+        thresholdText: bbMetric.thresholdText,
+      },
+      {
+        key: "momentum",
+        label: "Momentum",
+        color: "#34d399",
+        value: momentumEnabled ? (swingLongReady ? 1 : 0) : 1,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentLong.momentum,
+        valueText: momentumEnabled ? String(Boolean(swingLongReady)) : "off",
+        thresholdText: "true",
+      },
+      {
+        key: "volatility",
+        label: "ATR %",
+        color: "#f472b6",
+        value: atrPctValue,
+        threshold: minEntryAtrPct > 0 ? minEntryAtrPct : 0,
+        min: 0,
+        max: 0.4,
+        pass: currentLong.volatility,
+        valueText: `${num(atrPctValue, 4)}%`,
+        thresholdText: minEntryAtrPct > 0 ? `${num(minEntryAtrPct, 4)}%` : "off",
+      },
+      {
+        key: "all",
+        label: "Entry",
+        color: "#22c55e",
+        value: currentLong.all === null ? null : currentLong.all ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentLong.all,
+        valueText: currentLong.all === null ? "n/a" : String(currentLong.all),
+        thresholdText: "true",
+      },
+    ];
+  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiEntry, currentLong.rsi, currentLong.trend, currentLong.bb, currentLong.momentum, currentLong.volatility, currentLong.all, momentumEnabled, swingLongReady, minEntryAtrPct]);
+
+  const shortMetrics = useMemo<ThresholdSliderMetric[]>(() => {
+    const rsiValue = evalRow?.rsi ?? null;
+    const trendValue = close !== null && emaFastValue !== null && emaFastValue !== 0 ? ((close - emaFastValue) / emaFastValue) * 100 : null;
+    const bbMetric = computeBbMetric("short", bbMode, close, bbLower, bbUpper, bbThreshold);
+    const atrPctValue = close !== null && evalRow?.atr !== null && evalRow?.atr !== undefined && close > 0
+      ? (evalRow.atr / close) * 100
+      : null;
+    return [
+      {
+        key: "rsi",
+        label: "RSI",
+        color: "#38bdf8",
+        value: rsiValue,
+        threshold: rsiExit ?? null,
+        min: 0,
+        max: 100,
+        pass: currentShort.rsi,
+        valueText: num(rsiValue, 2),
+        thresholdText: num(rsiExit, 2),
+      },
+      {
+        key: "trend",
+        label: "Trend %",
+        color: "#f59e0b",
+        value: trendValue,
+        threshold: 0,
+        min: -1.5,
+        max: 1.5,
+        pass: currentShort.trend,
+        valueText: `${num(trendValue, 3)}%`,
+        thresholdText: "0.000%",
+      },
+      {
+        key: "bb",
+        label: "BB Dist",
+        color: "#a78bfa",
+        value: bbMetric.value,
+        threshold: bbMetric.threshold,
+        min: bbMetric.min,
+        max: bbMetric.max,
+        pass: currentShort.bb,
+        valueText: bbMetric.valueText,
+        thresholdText: bbMetric.thresholdText,
+      },
+      {
+        key: "momentum",
+        label: "Momentum",
+        color: "#34d399",
+        value: momentumEnabled ? (swingShortReady ? 1 : 0) : 1,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentShort.momentum,
+        valueText: momentumEnabled ? String(Boolean(swingShortReady)) : "off",
+        thresholdText: "true",
+      },
+      {
+        key: "volatility",
+        label: "ATR %",
+        color: "#f472b6",
+        value: atrPctValue,
+        threshold: minEntryAtrPct > 0 ? minEntryAtrPct : 0,
+        min: 0,
+        max: 0.4,
+        pass: currentShort.volatility,
+        valueText: `${num(atrPctValue, 4)}%`,
+        thresholdText: minEntryAtrPct > 0 ? `${num(minEntryAtrPct, 4)}%` : "off",
+      },
+      {
+        key: "all",
+        label: "Entry",
+        color: "#ef4444",
+        value: currentShort.all === null ? null : currentShort.all ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentShort.all,
+        valueText: currentShort.all === null ? "n/a" : String(currentShort.all),
+        thresholdText: "true",
+      },
+    ];
+  }, [evalRow, close, emaFastValue, bbMode, bbLower, bbUpper, bbThreshold, rsiExit, currentShort.rsi, currentShort.trend, currentShort.bb, currentShort.momentum, currentShort.volatility, currentShort.all, momentumEnabled, swingShortReady, minEntryAtrPct]);
+
+  const closeLongMetrics = useMemo<ThresholdSliderMetric[]>(() => {
+    const rsiValue = evalRow?.rsi ?? null;
+    const trendValue = close !== null && emaFastValue !== null && emaFastValue !== 0 ? ((close - emaFastValue) / emaFastValue) * 100 : null;
+    const holdNext = activeLongPosition ? Number(activeLongPosition.hold_bars) + 1 : null;
+    const minHold = Math.max(0, minHoldSignalBars ?? 0);
+    return [
+      {
+        key: "rsi_exit",
+        label: "RSI Exit",
+        color: "#38bdf8",
+        value: rsiValue,
+        threshold: rsiExit ?? null,
+        min: 0,
+        max: 100,
+        pass: currentCloseLong.rsi,
+        valueText: num(rsiValue, 2),
+        thresholdText: num(rsiExit, 2),
+      },
+      {
+        key: "trend_exit",
+        label: "Trend %",
+        color: "#f59e0b",
+        value: trendValue,
+        threshold: 0,
+        min: -1.5,
+        max: 1.5,
+        pass: currentCloseLong.trend,
+        valueText: `${num(trendValue, 3)}%`,
+        thresholdText: "< 0",
+      },
+      {
+        key: "signal",
+        label: "Signal",
+        color: "#60a5fa",
+        value: currentCloseLong.signal === null ? null : currentCloseLong.signal ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentCloseLong.signal,
+        valueText: currentCloseLong.signal === null ? "n/a" : String(currentCloseLong.signal),
+        thresholdText: "true",
+      },
+      {
+        key: "hold_gate",
+        label: "Hold Gate",
+        color: "#34d399",
+        value: holdNext,
+        threshold: minHold,
+        min: 0,
+        max: Math.max(minHold + 5, (maxHoldBars ?? minHold) + 2, 10),
+        pass: currentCloseLong.holdGate,
+        valueText: holdNext === null ? "n/a" : String(holdNext),
+        thresholdText: String(minHold),
+      },
+      {
+        key: "stop_tp_timed",
+        label: "Hard Exits",
+        color: "#f97316",
+        value:
+          currentCloseLong.stopHit === true || currentCloseLong.takeProfitHit === true || currentCloseLong.timedExit === true
+            ? 1
+            : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass:
+          currentCloseLong.stopHit === null && currentCloseLong.takeProfitHit === null && currentCloseLong.timedExit === null
+            ? null
+            : Boolean(currentCloseLong.stopHit || currentCloseLong.takeProfitHit || currentCloseLong.timedExit),
+        valueText: `S:${String(currentCloseLong.stopHit)} TP:${String(currentCloseLong.takeProfitHit)} T:${String(currentCloseLong.timedExit)}`,
+        thresholdText: "any=true",
+      },
+      {
+        key: "exit",
+        label: "Exit",
+        color: "#22c55e",
+        value: currentCloseLong.all === null ? null : currentCloseLong.all ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentCloseLong.all,
+        valueText: currentCloseLong.all === null ? "n/a" : String(currentCloseLong.all),
+        thresholdText: "true",
+      },
+    ];
+  }, [evalRow, close, emaFastValue, rsiExit, currentCloseLong.rsi, currentCloseLong.trend, currentCloseLong.signal, currentCloseLong.holdGate, currentCloseLong.stopHit, currentCloseLong.takeProfitHit, currentCloseLong.timedExit, currentCloseLong.all, activeLongPosition, minHoldSignalBars, maxHoldBars]);
+
+  const closeShortMetrics = useMemo<ThresholdSliderMetric[]>(() => {
+    const rsiValue = evalRow?.rsi ?? null;
+    const trendValue = close !== null && emaFastValue !== null && emaFastValue !== 0 ? ((close - emaFastValue) / emaFastValue) * 100 : null;
+    const holdNext = activeShortPosition ? Number(activeShortPosition.hold_bars) + 1 : null;
+    const minHold = Math.max(0, minHoldSignalBars ?? 0);
+    return [
+      {
+        key: "rsi_exit",
+        label: "RSI Exit",
+        color: "#38bdf8",
+        value: rsiValue,
+        threshold: rsiEntry ?? null,
+        min: 0,
+        max: 100,
+        pass: currentCloseShort.rsi,
+        valueText: num(rsiValue, 2),
+        thresholdText: num(rsiEntry, 2),
+      },
+      {
+        key: "trend_exit",
+        label: "Trend %",
+        color: "#f59e0b",
+        value: trendValue,
+        threshold: 0,
+        min: -1.5,
+        max: 1.5,
+        pass: currentCloseShort.trend,
+        valueText: `${num(trendValue, 3)}%`,
+        thresholdText: "> 0",
+      },
+      {
+        key: "signal",
+        label: "Signal",
+        color: "#60a5fa",
+        value: currentCloseShort.signal === null ? null : currentCloseShort.signal ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentCloseShort.signal,
+        valueText: currentCloseShort.signal === null ? "n/a" : String(currentCloseShort.signal),
+        thresholdText: "true",
+      },
+      {
+        key: "hold_gate",
+        label: "Hold Gate",
+        color: "#34d399",
+        value: holdNext,
+        threshold: minHold,
+        min: 0,
+        max: Math.max(minHold + 5, (maxHoldBars ?? minHold) + 2, 10),
+        pass: currentCloseShort.holdGate,
+        valueText: holdNext === null ? "n/a" : String(holdNext),
+        thresholdText: String(minHold),
+      },
+      {
+        key: "stop_tp_timed",
+        label: "Hard Exits",
+        color: "#f97316",
+        value:
+          currentCloseShort.stopHit === true || currentCloseShort.takeProfitHit === true || currentCloseShort.timedExit === true
+            ? 1
+            : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass:
+          currentCloseShort.stopHit === null && currentCloseShort.takeProfitHit === null && currentCloseShort.timedExit === null
+            ? null
+            : Boolean(currentCloseShort.stopHit || currentCloseShort.takeProfitHit || currentCloseShort.timedExit),
+        valueText: `S:${String(currentCloseShort.stopHit)} TP:${String(currentCloseShort.takeProfitHit)} T:${String(currentCloseShort.timedExit)}`,
+        thresholdText: "any=true",
+      },
+      {
+        key: "exit",
+        label: "Exit",
+        color: "#ef4444",
+        value: currentCloseShort.all === null ? null : currentCloseShort.all ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: currentCloseShort.all,
+        valueText: currentCloseShort.all === null ? "n/a" : String(currentCloseShort.all),
+        thresholdText: "true",
+      },
+    ];
+  }, [evalRow, close, emaFastValue, rsiEntry, currentCloseShort.rsi, currentCloseShort.trend, currentCloseShort.signal, currentCloseShort.holdGate, currentCloseShort.stopHit, currentCloseShort.takeProfitHit, currentCloseShort.timedExit, currentCloseShort.all, activeShortPosition, minHoldSignalBars, maxHoldBars]);
+
+  const simpleMechanism = useMemo(() => {
+    if ((timeframe !== "1m" && timeframe !== "5m") || rowIndex < 2 || !evalRow) {
+      return null;
+    }
+    const prevEval = rows[rowIndex - 2];
+    if (!prevEval) {
+      return null;
+    }
+
+    const bbMid = evalRow.bb_mid ?? null;
+    const bbLowerV = evalRow.bb_lower ?? null;
+    const bbUpperV = evalRow.bb_upper ?? null;
+    const halfWidth = bbMid !== null && bbLowerV !== null && bbUpperV !== null ? (bbUpperV - bbLowerV) * 0.5 : null;
+    const bbDeviation = close !== null && bbMid !== null && halfWidth !== null && halfWidth > 0 ? (close - bbMid) / halfWidth : null;
+
+    const tunedEmaFast = typeof tuning.ema_fast === "number" ? tuning.ema_fast : undefined;
+    const tunedEmaSlow = typeof tuning.ema_slow === "number" ? tuning.ema_slow : undefined;
+    const tunedSlopeLookback = typeof tuning.slope_lookback_bars === "number" ? tuning.slope_lookback_bars : 3;
+    const tunedFlattenFactor = typeof tuning.slope_flatten_factor === "number" ? tuning.slope_flatten_factor : 0.82;
+    const tunedEntryDev = typeof tuning.bb_entry_deviation === "number" ? tuning.bb_entry_deviation : 1.05;
+    const tunedExitDev = typeof tuning.bb_exit_deviation === "number" ? tuning.bb_exit_deviation : 0.15;
+
+    const emaFastNow = getEmaValue(evalRow, tunedEmaFast);
+    const emaFastPrev = getEmaValue(prevEval, tunedEmaFast);
+    const emaSlowNow = getEmaValue(evalRow, tunedEmaSlow);
+    const slopeNow = emaFastNow !== null && emaFastPrev !== null ? emaFastNow - emaFastPrev : null;
+    const slopeLookback =
+      rowIndex >= tunedSlopeLookback + 1 && emaFastNow !== null
+        ? (() => {
+            const lookbackVal = getEmaValue(rows[rowIndex - (tunedSlopeLookback + 1)], tunedEmaFast);
+            return lookbackVal !== null ? (emaFastNow - lookbackVal) / tunedSlopeLookback : null;
+          })()
+      : null;
+    const flattenRatio = slopeNow !== null && slopeLookback !== null ? Math.abs(slopeNow) / Math.max(Math.abs(slopeLookback), 1e-9) : null;
+
+    const longRounding = slopeNow !== null && slopeLookback !== null && flattenRatio !== null
+      ? slopeNow > slopeLookback && slopeNow < 0 && flattenRatio <= tunedFlattenFactor
+      : null;
+    const shortRounding = slopeNow !== null && slopeLookback !== null && flattenRatio !== null
+      ? slopeNow < slopeLookback && slopeNow > 0 && flattenRatio <= tunedFlattenFactor
+      : null;
+
+    const longEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && longRounding !== null
+      ? bbDeviation <= -tunedEntryDev && emaFastNow <= emaSlowNow && close <= emaFastNow && longRounding
+      : null;
+    const shortEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && shortRounding !== null
+      ? bbDeviation >= tunedEntryDev && emaFastNow >= emaSlowNow && close >= emaFastNow && shortRounding
+      : null;
+
+    const longExitSignal = bbDeviation !== null && emaFastNow !== null && close !== null && slopeNow !== null
+      ? bbDeviation >= -tunedExitDev || (close >= emaFastNow && slopeNow >= 0)
+      : null;
+    const shortExitSignal = bbDeviation !== null && emaFastNow !== null && close !== null && slopeNow !== null
+      ? bbDeviation <= tunedExitDev || (close <= emaFastNow && slopeNow <= 0)
+      : null;
+
+    return {
+      bbDeviation,
+      slopeNow,
+      slopeLookback,
+      flattenRatio,
+      longRounding,
+      shortRounding,
+      longEntry,
+      shortEntry,
+      longExitSignal,
+      shortExitSignal,
+      entryDeviation: tunedEntryDev,
+      exitDeviation: tunedExitDev,
+      flattenFactor: tunedFlattenFactor,
+    };
+  }, [timeframe, rowIndex, evalRow, rows, close, tuning]);
 
   const sideAvailability =
     tradeSide === "long_short" ? "Long + Short" : tradeSide === "short_only" ? "Short only" : "Long only";
@@ -350,11 +892,38 @@ export default function ChartLayout({ rows, gaps, overlays, panels, openPosition
             <span>Close {num(close)} / EMA{emaFast ?? "?"} {num(emaFastValue)}</span>
             <span>BB lower {num(bbLower)} / BB upper {num(bbUpper)}</span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <BinarySubplot title="Open Long" lanes={conditionSeries.longLanes} sideEnabled={longEnabled} />
-            <BinarySubplot title="Open Short" lanes={conditionSeries.shortLanes} sideEnabled={shortEnabled} />
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <ThresholdSliders title="Open Long" metrics={longMetrics} sideEnabled={longEnabled} />
+              <ThresholdSliders title="Close Long" metrics={closeLongMetrics} sideEnabled={longEnabled} />
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <ThresholdSliders title="Open Short" metrics={shortMetrics} sideEnabled={shortEnabled} />
+              <ThresholdSliders title="Close Short" metrics={closeShortMetrics} sideEnabled={shortEnabled} />
+            </div>
           </div>
         </div>
+        {simpleMechanism ? (
+          <div style={{ margin: "8px 10px", border: "1px solid #2d3f32", borderRadius: 8, background: "#101b14", padding: "8px 10px" }}>
+            <div style={{ fontSize: 11, color: "#a7f3d0", marginBottom: 8 }}>
+              {timeframe} Simple Engine Mechanism (BB deviation + EMA slope rounding)
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#bbf7d0", marginBottom: 6 }}>
+              <span>BB dev {num(simpleMechanism.bbDeviation, 3)} (entry threshold ±{num(simpleMechanism.entryDeviation, 2)})</span>
+              <span>Slope now {num(simpleMechanism.slopeNow, 6)}</span>
+              <span>Slope lookback {num(simpleMechanism.slopeLookback, 6)}</span>
+              <span>Flatten ratio {num(simpleMechanism.flattenRatio, 3)} {"<="} {num(simpleMechanism.flattenFactor, 2)}</span>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#d1fae5" }}>
+              <span>Long rounding {String(simpleMechanism.longRounding)}</span>
+              <span>Short rounding {String(simpleMechanism.shortRounding)}</span>
+              <span>Long entry signal {String(simpleMechanism.longEntry)}</span>
+              <span>Short entry signal {String(simpleMechanism.shortEntry)}</span>
+              <span>Long exit signal {String(simpleMechanism.longExitSignal)} (exit dev {-simpleMechanism.exitDeviation})</span>
+              <span>Short exit signal {String(simpleMechanism.shortExitSignal)} (exit dev {simpleMechanism.exitDeviation})</span>
+            </div>
+          </div>
+        ) : null}
         <CandleChart rows={rows} overlays={overlays} tradeMarkers={tradeMarkers} onCrosshair={setCrosshair} />
         <IndicatorPanels rows={rows} showVolume={true} showRsi={panels.rsi} showAtr={panels.atr} showBbWidth={panels.bbWidth} />
         <DataHealthPanel lastTs={rows[rows.length - 1]?.ts} gapCount={gaps.length} gaps={gaps} />

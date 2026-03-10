@@ -23,6 +23,7 @@ function Stop-ByPattern([string[]]$Patterns) {
 $killed = Stop-ByPattern @(
     "*uvicorn mdtas.api.app:app*",
     "*-m mdtas_worker*",
+    "*-m mdtas_worker_5m*",
     "*vite*",
     "*npm --prefix web run dev*"
 )
@@ -31,8 +32,10 @@ Write-Host "Stopped stale dev processes: $killed"
 
 Start-Process -FilePath ".\\.venv\\Scripts\\python.exe" -ArgumentList "-m","uvicorn","mdtas.api.app:app","--host","0.0.0.0","--port","8000" -WorkingDirectory $root -WindowStyle Minimized
 Start-Process -FilePath ".\\.venv\\Scripts\\python.exe" -ArgumentList "-m","mdtas_worker" -WorkingDirectory $root -WindowStyle Minimized
+Start-Process -FilePath ".\\.venv\\Scripts\\python.exe" -ArgumentList "-m","mdtas_worker_5m" -WorkingDirectory $root -WindowStyle Minimized
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c","npm --prefix web run dev" -WorkingDirectory $root -WindowStyle Minimized
 
 Write-Host "Started API on http://localhost:8000"
-Write-Host "Started worker"
+Write-Host "Started worker (1m)"
+Write-Host "Started worker (5m)"
 Write-Host "Started web on http://localhost:5173 (strict port)"

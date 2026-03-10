@@ -1,0 +1,42 @@
+generated_at_utc: '2026-03-10T02:28:55.190709+00:00'
+symbol: XRP/USD
+venue: coinbase
+timeframe: 1m
+selection_basis: timeboxed_20m_robust_score
+source_summary: artifacts\xrp_engine_v3_1m_timeboxed_report.json
+xrp_engine_v3_1m_params:
+  bb_length: 26
+  bb_stdev: 1.8
+  atr_length: 10
+  ema_fast: 28
+  ema_slow: 40
+  bb_entry_deviation: 1.05
+  bb_exit_deviation: 0.15
+  slope_lookback_bars: 5
+  slope_flatten_factor: 0.9
+  stop_atr: 1.4
+  take_profit_atr: 2.0
+  max_hold_bars: 60
+best_observed_metrics:
+  robust_score: 282.29351037786046
+  train:
+    score: 47.16005544486042
+    total_return: 0.005608227218401707
+    max_drawdown: -0.005088296917090673
+    sharpe: 8.028760117687355
+    trades: 6
+    win_rate: 0.8333333333333334
+  test:
+    score: 408.90383226486045
+    total_return: 0.0024564242112228296
+    max_drawdown: 0.0
+    sharpe: 45.47386928958822
+    trades: 1
+    win_rate: 1.0
+  full:
+    score: 66.81634978331722
+    total_return: 0.008078427614746087
+    max_drawdown: -0.005088296917090673
+    sharpe: 9.576773519825485
+    trades: 7
+    win_rate: 0.8571428571428571

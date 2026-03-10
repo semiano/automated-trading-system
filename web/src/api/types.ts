@@ -85,6 +85,7 @@ export type PortfolioRiskLimit = {
 
 export type AssetControl = {
   symbol: string;
+  timeframe: string;
   enabled: boolean;
   execution_mode: "sim" | "live";
   trade_side: "long_only" | "long_short" | "short_only";
