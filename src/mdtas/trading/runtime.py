@@ -1383,6 +1383,7 @@ class TradingRuntime:
             exit_price=exit_fill.price,
             exit_reason=reason,
             exit_fee=exit_fill.fee_usd,
+            hold_bars_at_exit=hold_bars,
         )
         self.trading_repo.set_asset_state(
             symbol=trade.symbol,

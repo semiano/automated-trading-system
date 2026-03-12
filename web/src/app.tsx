@@ -115,12 +115,6 @@ export default function App() {
   const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
   const [catchupError, setCatchupError] = useState<string | null>(null);
   const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
-  const [pendingTradeFocus, setPendingTradeFocus] = useState<{
-    symbol: string;
-    timeframe: string;
-    entryTs: string;
-    exitTs: string;
-  } | null>(null);
 
   const { chartRows, chartDataCap } = useMemo((): { chartRows: IndicatorRow[]; chartDataCap: ChartDataCapInfo | null } => {
     const capLimit = chartPointLimitForTimeframe(timeframe);
@@ -393,26 +387,6 @@ export default function App() {
     return fetchAssetTuningVersions(payload);
   };
 
-  const handleGoToTradeChart = (trade: ClosedTrade) => {
-    const tf = trade.timeframe;
-    const tfMinutes = tf.endsWith("m") ? Number(tf.slice(0, -1)) : tf.endsWith("h") ? Number(tf.slice(0, -1)) * 60 : tf.endsWith("d") ? Number(tf.slice(0, -1)) * 1440 : 5;
-    const bufferBars = 24;
-    const bufferMs = Math.max(1, tfMinutes) * 60 * 1000 * bufferBars;
-    const entryMs = Date.parse(trade.entry_ts);
-    const earliestMs = Number.isFinite(entryMs) ? Math.max(0, entryMs - bufferMs) : Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const days = Math.max(1, Math.ceil((Date.now() - earliestMs) / (24 * 60 * 60 * 1000)));
-
-    setSymbol(trade.symbol);
-    setTimeframe(tf);
-    setRangeDays(days);
-    setView("chart");
-    setPendingTradeFocus({
-      symbol: trade.symbol,
-      timeframe: tf,
-      entryTs: trade.entry_ts,
-      exitTs: trade.exit_ts,
-    });
-  };
 
   useEffect(() => {
     if (!isSelectedSymbolActive) {
@@ -453,35 +427,6 @@ export default function App() {
       .catch(() => setChartClosedTrades([]));
   }, [symbol, timeframe, venue, timeRange.start, timeRange.end, indicatorsArg, isSelectedSymbolActive]);
 
-  useEffect(() => {
-    if (!pendingTradeFocus || rows.length === 0) {
-      return;
-    }
-    if (symbol !== pendingTradeFocus.symbol || timeframe !== pendingTradeFocus.timeframe) {
-      return;
-    }
-
-    const entryMs = parseApiTsMillis(pendingTradeFocus.entryTs);
-    const exitMs = parseApiTsMillis(pendingTradeFocus.exitTs);
-    const targetMs = Number.isFinite(entryMs) && Number.isFinite(exitMs) ? (entryMs + exitMs) / 2 : Number.isFinite(exitMs) ? exitMs : entryMs;
-    if (!Number.isFinite(targetMs)) {
-      setPendingTradeFocus(null);
-      return;
-    }
-
-    let bestRow = rows[0];
-    let bestDist = Math.abs(parseApiTsMillis(bestRow.ts) - targetMs);
-    for (const row of rows) {
-      const dist = Math.abs(parseApiTsMillis(row.ts) - targetMs);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestRow = row;
-      }
-    }
-
-    setCrosshair(bestRow);
-    setPendingTradeFocus(null);
-  }, [pendingTradeFocus, rows, symbol, timeframe]);
 
   return (
     <div>
@@ -560,7 +505,6 @@ export default function App() {
           onFetchAssetTuningVersions={loadAssetTuningVersions}
           onValueBalanceAsset={rebalanceAssetValue}
           onSaveRiskPolicy={saveRiskPolicy}
-          onGoToTradeChart={handleGoToTradeChart}
         />
       ) : (
         <IngestionStatusPage rows={catchupRows} error={catchupError} updatedAt={catchupUpdatedAt} />

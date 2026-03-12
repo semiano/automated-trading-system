@@ -80,6 +80,7 @@ export type ClosedTrade = {
   net_pnl: number;
   return_pct: number;
   exit_reason: string;
+  hold_bars_at_exit?: number | null;
 };
 
 export type ClosedTradesResponse = {

@@ -75,6 +75,7 @@ $files = @(
     "config.yaml",
     "src/mdtas/config.py",
     "src/mdtas/db/models.py",
+    "src/mdtas/db/session.py",
     "src/mdtas/db/trading_repo.py",
     "src/mdtas/trading/execution.py",
     "src/mdtas/trading/runtime.py",

@@ -71,6 +71,7 @@ class ClosedTradeOut(BaseModel):
     net_pnl: float
     return_pct: float
     exit_reason: str
+    hold_bars_at_exit: int | None = None
 
 
 class ClosedTradesResponse(BaseModel):

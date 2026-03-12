@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { fetchAssetLogs } from "../api/client";
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, OpenPosition, RiskPolicySettings } from "../api/types";
+import { fetchAssetLogs, fetchCandles, fetchIndicators } from "../api/client";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, OpenPosition, RiskPolicySettings } from "../api/types";
 import { num } from "../utils/formatting";
 
 type Props = {
@@ -50,7 +50,6 @@ type Props = {
     risk_budget_policy?: "per_symbol" | "portfolio";
     portfolio_soft_risk_limit_usd?: number;
   }) => Promise<void>;
-  onGoToTradeChart: (trade: ClosedTrade) => void;
 };
 
 function timeframeColor(tf: string): string {
@@ -75,11 +74,19 @@ function tradeLengthBars(entryTs: string, exitTs: string, timeframe: string): nu
   return Math.max(1, Math.round(elapsedSeconds / tfSeconds));
 }
 
+function tradeLengthLabel(trade: ClosedTrade): string {
+  if (typeof trade.hold_bars_at_exit === "number" && Number.isFinite(trade.hold_bars_at_exit) && trade.hold_bars_at_exit > 0) {
+    return `${trade.hold_bars_at_exit} @ ${trade.timeframe}`;
+  }
+  const barsHeld = tradeLengthBars(trade.entry_ts, trade.exit_ts, trade.timeframe);
+  return barsHeld !== null ? `${barsHeld} @ ${trade.timeframe}` : "-";
+}
+
 function usd(value: number): string {
   return value.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset, onSaveRiskPolicy, onGoToTradeChart }: Props) {
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset, onSaveRiskPolicy }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
   const [draftPortfolioLimit, setDraftPortfolioLimit] = useState<string>(String(riskPolicy.portfolio_soft_risk_limit_usd));
   const [saving, setSaving] = useState(false);
@@ -102,6 +109,11 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const [filterPnl, setFilterPnl] = useState<string>("all");
   const [yMode, setYMode] = useState<"net" | "pct">("pct");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [previewTrade, setPreviewTrade] = useState<ClosedTrade | null>(null);
+  const [previewRows, setPreviewRows] = useState<IndicatorRow[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewHoverIndex, setPreviewHoverIndex] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [flashUntil, setFlashUntil] = useState<Record<string, number>>({});
   const prevSignalsRef = useRef<Record<string, { lastRun: string; nextRun: string; risk: number }>>({});
@@ -124,6 +136,17 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!previewTrade) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setPreviewTrade(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewTrade]);
 
   useEffect(() => {
     const now = Date.now();
@@ -164,6 +187,75 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     const normalized = /([zZ]|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
     const parsed = new Date(normalized);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const parseApiTsMillis = (value: string | null | undefined): number => {
+    const parsed = parseApiTimestamp(value);
+    return parsed ? parsed.getTime() : Number.NaN;
+  };
+
+  const openTradePreview = async (trade: ClosedTrade) => {
+    setPreviewTrade(trade);
+    setPreviewRows([]);
+    setPreviewError(null);
+    setPreviewHoverIndex(null);
+    setPreviewLoading(true);
+
+    try {
+      const tfSeconds = timeframeToSeconds(trade.timeframe) ?? 300;
+      const entryMs = parseApiTsMillis(trade.entry_ts);
+      const exitMs = parseApiTsMillis(trade.exit_ts);
+      const centerStart = Number.isFinite(entryMs) ? entryMs : Date.now();
+      const centerEnd = Number.isFinite(exitMs) ? exitMs : centerStart;
+      const minMs = Math.min(centerStart, centerEnd);
+      const maxMs = Math.max(centerStart, centerEnd);
+
+      const start = new Date(Math.max(0, minMs - tfSeconds * 80_000)).toISOString();
+      const end = new Date(maxMs + tfSeconds * 80_000).toISOString();
+
+      const [candles, indicatorRows] = await Promise.all([
+        fetchCandles({ symbol: trade.symbol, timeframe: trade.timeframe, venue: trade.venue, start, end, limit: 2000 }),
+        fetchIndicators({
+          symbol: trade.symbol,
+          timeframe: trade.timeframe,
+          venue: trade.venue,
+          start,
+          end,
+          indicators: "bbands,ema20,ema50,ema200",
+        }).catch(() => [] as IndicatorRow[]),
+      ]);
+
+      const merged = new Map<string, IndicatorRow>();
+      candles.forEach((row) => merged.set(row.ts, { ...row }));
+      indicatorRows.forEach((row) => merged.set(row.ts, { ...(merged.get(row.ts) ?? row), ...row }));
+
+      const sorted = Array.from(merged.values()).sort((a, b) => parseApiTsMillis(a.ts) - parseApiTsMillis(b.ts));
+      if (sorted.length === 0) {
+        setPreviewRows([]);
+        setPreviewError("No candles found for this trade window.");
+        return;
+      }
+
+      const firstInside = sorted.findIndex((row) => parseApiTsMillis(row.ts) >= minMs);
+      let lastInside = -1;
+      for (let i = sorted.length - 1; i >= 0; i -= 1) {
+        if (parseApiTsMillis(sorted[i].ts) <= maxMs) {
+          lastInside = i;
+          break;
+        }
+      }
+
+      const baseStart = firstInside >= 0 ? firstInside : 0;
+      const baseEnd = lastInside >= 0 ? Math.max(lastInside, baseStart) : sorted.length - 1;
+      const windowStart = Math.max(0, baseStart - 10);
+      const windowEnd = Math.min(sorted.length - 1, baseEnd + 10);
+      setPreviewRows(sorted.slice(windowStart, windowEnd + 1));
+    } catch {
+      setPreviewRows([]);
+      setPreviewError("Failed to load trade preview data.");
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const formatCountdown = (nextRunTs: string | null | undefined): string => {
@@ -1246,7 +1338,6 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                 filteredClosedTrades.map((row, idx) => {
                   const notionalUsd = row.entry_price * row.qty;
                   const returnUsd = notionalUsd * (row.return_pct / 100);
-                  const barsHeld = tradeLengthBars(row.entry_ts, row.exit_ts, row.timeframe);
                   const pnlPositive = row.net_pnl >= 0;
                   const rowBg = idx % 2 === 0 ? "transparent" : "#0d1118";
                   return (
@@ -1255,7 +1346,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       <td style={{ padding: 8, fontWeight: 600 }}>{row.symbol}</td>
                       <td style={{ padding: 8 }}>{row.execution_mode === "sim" ? "Sim" : "Real"}</td>
                       <td style={{ padding: 8 }}>{row.timeframe}</td>
-                      <td style={{ textAlign: "right", padding: 8 }}>{barsHeld !== null ? `${barsHeld} @ ${row.timeframe}` : "-"}</td>
+                      <td style={{ textAlign: "right", padding: 8 }}>{tradeLengthLabel(row)}</td>
                       <td style={{ padding: 8 }}>{row.trade_side === "short" ? "Short" : "Long"}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{num(row.entry_price, 6)}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{num(row.exit_price, 6)}</td>
@@ -1267,10 +1358,10 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       <td style={{ padding: 8 }}>
                         <button
                           type="button"
-                          onClick={() => onGoToTradeChart(row)}
+                          onClick={() => void openTradePreview(row)}
                           style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: "#101827", color: "#dbe6f5", cursor: "pointer", fontSize: 11 }}
                         >
-                          Go to Chart
+                          Quick View
                         </button>
                       </td>
                     </tr>
@@ -1281,6 +1372,192 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
           </table>
         </div>
       </section>
+
+      {previewTrade ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPreviewTrade(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(8, 11, 18, 0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 70,
+            padding: 14,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1100px, 95vw)",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              background: "#0f131c",
+              border: "1px solid #2d3340",
+              borderRadius: 10,
+              display: "grid",
+              gridTemplateRows: "auto 1fr",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #2d3340", gap: 10 }}>
+              <strong>
+                Trade Quick View - {previewTrade.symbol} ({previewTrade.timeframe})
+              </strong>
+              <button type="button" onClick={() => setPreviewTrade(null)} style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: "transparent", color: "inherit", cursor: "pointer" }}>
+                Close
+              </button>
+            </div>
+            <div style={{ overflow: "auto", padding: 12 }}>
+              {previewLoading ? (
+                <div style={{ fontSize: 12 }}>Loading trade preview...</div>
+              ) : previewError ? (
+                <div style={{ fontSize: 12, color: "#fca5a5" }}>{previewError}</div>
+              ) : previewRows.length === 0 ? (
+                <div style={{ fontSize: 12 }}>No preview candles.</div>
+              ) : (
+                (() => {
+                  const w = 1020;
+                  const h = 360;
+                  const m = { left: 54, right: 18, top: 18, bottom: 28 };
+                  const iw = w - m.left - m.right;
+                  const ih = h - m.top - m.bottom;
+                  const lows = previewRows.map((r) => r.low);
+                  const highs = previewRows.map((r) => r.high);
+                  const overlays = previewRows.flatMap((r) => [r.bb_lower, r.bb_mid, r.bb_upper, r.ema20, r.ema50, r.ema200].filter((v): v is number => typeof v === "number" && Number.isFinite(v)));
+                  const minV = Math.min(...lows, ...(overlays.length > 0 ? overlays : lows));
+                  const maxV = Math.max(...highs, ...(overlays.length > 0 ? overlays : highs));
+                  const span = Math.max(maxV - minV, 1e-9);
+                  const pad = span * 0.06;
+                  const dMin = minV - pad;
+                  const dMax = maxV + pad;
+                  const dSpan = Math.max(dMax - dMin, 1e-9);
+                  const xStep = previewRows.length > 1 ? iw / (previewRows.length - 1) : iw;
+                  const xFor = (i: number) => m.left + i * xStep;
+                  const yFor = (v: number) => m.top + ih - ((v - dMin) / dSpan) * ih;
+
+                  const pathFor = (key: "bb_lower" | "bb_mid" | "bb_upper" | "ema20" | "ema50" | "ema200") => {
+                    let d = "";
+                    previewRows.forEach((row, i) => {
+                      const v = row[key];
+                      if (typeof v !== "number" || !Number.isFinite(v)) return;
+                      d += `${d ? " L" : "M"}${xFor(i)} ${yFor(v)}`;
+                    });
+                    return d;
+                  };
+
+                  const entryMs = parseApiTsMillis(previewTrade.entry_ts);
+                  const exitMs = parseApiTsMillis(previewTrade.exit_ts);
+                  let entryIdx = 0;
+                  let exitIdx = previewRows.length - 1;
+                  let bestEntryDist = Number.POSITIVE_INFINITY;
+                  let bestExitDist = Number.POSITIVE_INFINITY;
+                  previewRows.forEach((row, i) => {
+                    const t = parseApiTsMillis(row.ts);
+                    const entryDist = Math.abs(t - entryMs);
+                    const exitDist = Math.abs(t - exitMs);
+                    if (entryDist < bestEntryDist) {
+                      bestEntryDist = entryDist;
+                      entryIdx = i;
+                    }
+                    if (exitDist < bestExitDist) {
+                      bestExitDist = exitDist;
+                      exitIdx = i;
+                    }
+                  });
+
+                  const beforeBars = entryIdx;
+                  const insideBars = Math.max(0, exitIdx - entryIdx + 1);
+                  const afterBars = Math.max(0, previewRows.length - 1 - exitIdx);
+                  const activeIdx = previewHoverIndex !== null && previewHoverIndex >= 0 && previewHoverIndex < previewRows.length
+                    ? previewHoverIndex
+                    : null;
+                  const activeRow = activeIdx !== null ? previewRows[activeIdx] : null;
+                  const activeX = activeIdx !== null ? xFor(activeIdx) : null;
+
+                  return (
+                    <>
+                      <div style={{ marginBottom: 8, fontSize: 12, color: "#cbd5e1", display: "flex", flexWrap: "wrap", gap: 14 }}>
+                        <span>Window Bars: <strong>{previewRows.length}</strong> ({beforeBars} before, {insideBars} in-trade, {afterBars} after)</span>
+                        <span>Entry: <strong>{new Date(previewTrade.entry_ts).toLocaleString()}</strong></span>
+                        <span>Exit: <strong>{new Date(previewTrade.exit_ts).toLocaleString()}</strong></span>
+                        <span>Reason: <strong>{previewTrade.exit_reason}</strong></span>
+                      </div>
+                      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block", background: "#0b1119", borderRadius: 8, border: "1px solid #1f2937" }}>
+                        {[0, 1, 2, 3, 4].map((tick) => {
+                          const frac = tick / 4;
+                          const y = m.top + frac * ih;
+                          const v = dMax - frac * dSpan;
+                          return (
+                            <g key={`preview-grid-${tick}`}>
+                              <line x1={m.left} y1={y} x2={w - m.right} y2={y} stroke="#1f2a3a" strokeWidth={1} />
+                              <text x={m.left - 7} y={y + 4} textAnchor="end" fontSize={10} fill="#93a3b8">{num(v, 6)}</text>
+                            </g>
+                          );
+                        })}
+
+                        <line x1={xFor(entryIdx)} y1={m.top} x2={xFor(entryIdx)} y2={h - m.bottom} stroke="#67e8f9" strokeDasharray="4 3" strokeWidth={1.2} />
+                        <line x1={xFor(exitIdx)} y1={m.top} x2={xFor(exitIdx)} y2={h - m.bottom} stroke="#fca5a5" strokeDasharray="4 3" strokeWidth={1.2} />
+
+                        {activeX !== null ? (
+                          <line x1={activeX} y1={m.top} x2={activeX} y2={h - m.bottom} stroke="#e2e8f0" strokeDasharray="3 3" strokeWidth={1} opacity={0.6} />
+                        ) : null}
+
+                        {previewRows.map((row, i) => {
+                          const x = xFor(i);
+                          const yHigh = yFor(row.high);
+                          const yLow = yFor(row.low);
+                          const yOpen = yFor(row.open);
+                          const yClose = yFor(row.close);
+                          const up = row.close >= row.open;
+                          const bodyTop = Math.min(yOpen, yClose);
+                          const bodyH = Math.max(1, Math.abs(yClose - yOpen));
+                          const bodyW = Math.max(2, Math.min(9, xStep * 0.62));
+                          return (
+                            <g key={`candle-${row.ts}`} onMouseEnter={() => setPreviewHoverIndex(i)} onMouseMove={() => setPreviewHoverIndex(i)}>
+                              <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={up ? "#34d399" : "#f87171"} strokeWidth={1} />
+                              <rect x={x - bodyW / 2} y={bodyTop} width={bodyW} height={bodyH} fill={up ? "#34d399" : "#f87171"} opacity={0.9} />
+                            </g>
+                          );
+                        })}
+
+                        <path d={pathFor("bb_upper")} fill="none" stroke="#60a5fa" strokeWidth={1.2} opacity={0.85} />
+                        <path d={pathFor("bb_mid")} fill="none" stroke="#93c5fd" strokeWidth={1.1} opacity={0.8} />
+                        <path d={pathFor("bb_lower")} fill="none" stroke="#60a5fa" strokeWidth={1.2} opacity={0.85} />
+                        <path d={pathFor("ema20")} fill="none" stroke="#f59e0b" strokeWidth={1.35} />
+                        <path d={pathFor("ema50")} fill="none" stroke="#a78bfa" strokeWidth={1.25} />
+                        <path d={pathFor("ema200")} fill="none" stroke="#f43f5e" strokeWidth={1.1} opacity={0.9} />
+                      </svg>
+                      {activeRow ? (
+                        <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 6, border: "1px solid #334155", background: "#101827", fontSize: 11, color: "#cbd5e1", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                          <span>{new Date(activeRow.ts).toLocaleString()}</span>
+                          <span>O {num(activeRow.open, 6)}</span>
+                          <span>H {num(activeRow.high, 6)}</span>
+                          <span>L {num(activeRow.low, 6)}</span>
+                          <span>C {num(activeRow.close, 6)}</span>
+                          <span>BB U/M/L {num(activeRow.bb_upper, 6)} / {num(activeRow.bb_mid, 6)} / {num(activeRow.bb_lower, 6)}</span>
+                          <span>EMA 20/50/200 {num(activeRow.ema20, 6)} / {num(activeRow.ema50, 6)} / {num(activeRow.ema200, 6)}</span>
+                        </div>
+                      ) : null}
+                      <div style={{ marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "#9ca3af" }}>
+                        <span><span style={{ color: "#67e8f9" }}>|</span> Entry marker</span>
+                        <span><span style={{ color: "#fca5a5" }}>|</span> Exit marker</span>
+                        <span><span style={{ color: "#e2e8f0" }}>|</span> Hover marker</span>
+                        <span><span style={{ color: "#60a5fa" }}>-</span> Bollinger Bands</span>
+                        <span><span style={{ color: "#f59e0b" }}>-</span> EMA20</span>
+                        <span><span style={{ color: "#a78bfa" }}>-</span> EMA50</span>
+                        <span><span style={{ color: "#f43f5e" }}>-</span> EMA200</span>
+                      </div>
+                    </>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

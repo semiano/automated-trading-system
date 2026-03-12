@@ -25,6 +25,7 @@ def init_db() -> None:
             _ensure_column("positions", "trade_side", "TEXT DEFAULT 'long'")
             _ensure_column("trades", "execution_mode", "TEXT DEFAULT 'sim'")
             _ensure_column("trades", "trade_side", "TEXT DEFAULT 'long'")
+            _ensure_column("trades", "hold_bars_at_exit", "INTEGER")
             _ensure_column("asset_controls", "trade_side", "TEXT DEFAULT 'long_only'")
             _ensure_column("asset_controls", "last_evaluated_state", "TEXT")
             _ensure_column("asset_controls", "last_evaluated_note", "TEXT")
@@ -99,6 +100,7 @@ def init_db() -> None:
     with engine.begin() as conn:
         conn.exec_driver_sql("ALTER TABLE asset_controls ADD COLUMN IF NOT EXISTS timeframe VARCHAR(16) DEFAULT '5m'")
         conn.exec_driver_sql("ALTER TABLE asset_engine_logs ADD COLUMN IF NOT EXISTS timeframe VARCHAR(16) DEFAULT '5m'")
+        conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS hold_bars_at_exit INTEGER")
         conn.exec_driver_sql("UPDATE asset_controls SET timeframe='5m' WHERE timeframe IS NULL OR timeframe='' ")
         conn.exec_driver_sql("UPDATE asset_engine_logs SET timeframe='5m' WHERE timeframe IS NULL OR timeframe='' ")
         conn.exec_driver_sql("ALTER TABLE asset_controls DROP CONSTRAINT IF EXISTS asset_controls_symbol_key")

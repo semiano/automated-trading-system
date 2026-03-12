@@ -287,6 +287,7 @@ def closed_trades(
             net_pnl=float(item.net_pnl),
             return_pct=float(item.return_pct),
             exit_reason=item.exit_reason,
+            hold_bars_at_exit=int(item.hold_bars_at_exit) if item.hold_bars_at_exit is not None else None,
         )
         for item in rows
     ]

@@ -125,6 +125,7 @@ class Trade(Base):
     net_pnl: Mapped[float] = mapped_column(Float)
     return_pct: Mapped[float] = mapped_column(Float)
     exit_reason: Mapped[str] = mapped_column(String(32), index=True)
+    hold_bars_at_exit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     closed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), default=func.now(), nullable=False
     )

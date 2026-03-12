@@ -351,6 +351,7 @@ class TradingRepository:
         exit_price: float,
         exit_reason: str,
         exit_fee: float,
+        hold_bars_at_exit: int | None = None,
     ) -> Trade:
         gross_pnl = (exit_price - position.entry_price) * position.qty
         if position.trade_side == "short":
@@ -380,6 +381,7 @@ class TradingRepository:
             net_pnl=net_pnl,
             return_pct=return_pct,
             exit_reason=exit_reason,
+            hold_bars_at_exit=int(position.hold_bars if hold_bars_at_exit is None else hold_bars_at_exit),
         )
         self.session.add(trade)
         self.session.commit()

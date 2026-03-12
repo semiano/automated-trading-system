@@ -607,5 +607,6 @@ class Simple5mRuntime:
             exit_price=float(exit_fill.price),
             exit_reason=exit_reason,
             exit_fee=float(exit_fill.fee_usd),
+            hold_bars_at_exit=hold_bars,
         )
         self._emit_decision(symbol, timeframe, ts, "exit", [exit_reason], tuning_version=tuning_version)
