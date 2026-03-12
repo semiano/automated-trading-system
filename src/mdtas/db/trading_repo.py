@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
-from mdtas.db.models import AssetControl, AssetEngineLog, Position, Trade
+from mdtas.db.models import AssetControl, AssetEngineLog, AssetTuningVersion, Position, Trade
 
 
 @dataclass(slots=True)
@@ -174,6 +174,68 @@ class TradingRepository:
             .order_by(AssetEngineLog.created_at.desc(), AssetEngineLog.id.desc())
             .limit(limit)
         ).all()
+
+    def latest_asset_tuning_version(self, symbol: str, timeframe: str) -> AssetTuningVersion | None:
+        return self.session.scalar(
+            select(AssetTuningVersion)
+            .where(
+                AssetTuningVersion.symbol == symbol,
+                AssetTuningVersion.timeframe == timeframe,
+                AssetTuningVersion.is_active.is_(True),
+            )
+            .order_by(AssetTuningVersion.version.desc(), AssetTuningVersion.id.desc())
+            .limit(1)
+        )
+
+    def list_asset_tuning_versions(self, symbol: str, timeframe: str, limit: int = 50) -> list[AssetTuningVersion]:
+        return self.session.scalars(
+            select(AssetTuningVersion)
+            .where(AssetTuningVersion.symbol == symbol, AssetTuningVersion.timeframe == timeframe)
+            .order_by(AssetTuningVersion.version.desc(), AssetTuningVersion.id.desc())
+            .limit(limit)
+        ).all()
+
+    def create_asset_tuning_version(
+        self,
+        symbol: str,
+        timeframe: str,
+        params_json: dict[str, float | int],
+        note: str | None = None,
+        source: str | None = None,
+        updated_by: str | None = None,
+    ) -> AssetTuningVersion:
+        max_version = self.session.scalar(
+            select(func.max(AssetTuningVersion.version)).where(
+                AssetTuningVersion.symbol == symbol,
+                AssetTuningVersion.timeframe == timeframe,
+            )
+        )
+        next_version = int(max_version or 0) + 1
+
+        self.session.execute(
+            update(AssetTuningVersion)
+            .where(
+                AssetTuningVersion.symbol == symbol,
+                AssetTuningVersion.timeframe == timeframe,
+                AssetTuningVersion.is_active.is_(True),
+            )
+            .values(is_active=False)
+        )
+
+        row = AssetTuningVersion(
+            symbol=symbol,
+            timeframe=timeframe,
+            version=next_version,
+            params_json={k: params_json[k] for k in sorted(params_json.keys())},
+            note=note,
+            source=source,
+            updated_by=updated_by,
+            is_active=True,
+        )
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return row
 
     def get_open_position(
         self,

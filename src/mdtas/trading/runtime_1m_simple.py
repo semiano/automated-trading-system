@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -51,12 +52,16 @@ class Simple1mParams:
 
 
 class Simple1mParamResolver:
-    def __init__(self, cfg: AppConfig) -> None:
+    def __init__(self, cfg: AppConfig, trading_repo: TradingRepository | None = None) -> None:
         self.cfg = cfg
+        self.trading_repo = trading_repo
         self._tuned_symbol: str | None = None
         self._tuned_params: Simple1mParams | None = None
         self._tuned_path: Path | None = None
         self._tuned_mtime_ns: int | None = None
+        self._db_cache: dict[str, tuple[Simple1mParams, int]] = {}
+        self._db_next_refresh_s: float = 0.0
+        self._db_refresh_interval_s: float = 5.0
         self._refresh_tuned_if_needed()
 
     @staticmethod
@@ -134,6 +139,37 @@ class Simple1mParamResolver:
         self._load_tuned_file(path)
 
     def for_symbol(self, symbol: str) -> Simple1mParams:
+        now_s = time.monotonic()
+        if self.trading_repo is not None and now_s >= self._db_next_refresh_s:
+            latest = self.trading_repo.latest_asset_tuning_version(symbol=symbol, timeframe=self.cfg.trading_1m.runtime_timeframe)
+            if latest is not None:
+                tuned = latest.params_json or {}
+                self._db_cache[symbol] = (
+                    Simple1mParams(
+                        bb_length=int(tuned.get("bb_length", 20)),
+                        bb_stdev=float(tuned.get("bb_stdev", 2.0)),
+                        atr_length=int(tuned.get("atr_length", 14)),
+                        ema_fast=int(tuned.get("ema_fast", 20)),
+                        ema_slow=int(tuned.get("ema_slow", 50)),
+                        bb_entry_deviation=float(tuned.get("bb_entry_deviation", 1.05)),
+                        bb_exit_deviation=float(tuned.get("bb_exit_deviation", 0.15)),
+                        slope_lookback_bars=int(tuned.get("slope_lookback_bars", 3)),
+                        slope_flatten_factor=float(tuned.get("slope_flatten_factor", 0.82)),
+                        stop_atr=float(tuned.get("stop_atr", 1.4)),
+                        take_profit_atr=float(tuned.get("take_profit_atr", 2.2)),
+                        max_hold_bars=int(tuned.get("max_hold_bars", 60)),
+                        min_hold_bars=int(tuned.get("min_hold_bars", self.cfg.trading_1m.default_params.min_hold_bars)),
+                        max_take_profit_pct=float(
+                            tuned.get("max_take_profit_pct", self.cfg.trading_1m.default_params.max_take_profit_pct)
+                        ),
+                    ),
+                    int(latest.version),
+                )
+            self._db_next_refresh_s = now_s + self._db_refresh_interval_s
+
+        if symbol in self._db_cache:
+            return self._db_cache[symbol][0]
+
         self._refresh_tuned_if_needed()
         if symbol in self.cfg.trading_1m.per_asset_params:
             return self._from_config(self.cfg.trading_1m.per_asset_params[symbol])
@@ -141,18 +177,25 @@ class Simple1mParamResolver:
             return self._tuned_params
         return self._from_config(self.cfg.trading_1m.default_params)
 
+    def version_for_symbol(self, symbol: str) -> int | None:
+        self.for_symbol(symbol)
+        cached = self._db_cache.get(symbol)
+        if cached is None:
+            return None
+        return int(cached[1])
+
 
 class Simple1mRuntime:
     def __init__(self, cfg: AppConfig, candle_repo: CandleRepository, trading_repo: TradingRepository) -> None:
         self.cfg = cfg
         self.candle_repo = candle_repo
         self.trading_repo = trading_repo
-        self.params_resolver = Simple1mParamResolver(cfg)
+        self.params_resolver = Simple1mParamResolver(cfg, trading_repo)
         self.execution = self._build_execution_adapter()
 
     def apply_config(self, cfg: AppConfig) -> None:
         self.cfg = cfg
-        self.params_resolver = Simple1mParamResolver(cfg)
+        self.params_resolver = Simple1mParamResolver(cfg, self.trading_repo)
         self.execution = self._build_execution_adapter()
 
     def _build_execution_adapter(self):
@@ -216,8 +259,20 @@ class Simple1mRuntime:
         lookback_slope = (float(now[col]) - float(prev[col])) / float(lookback)
         return latest, lookback_slope
 
-    def _emit_decision(self, symbol: str, timeframe: str, ts: datetime, decision: str, reasons: list[str]) -> None:
-        first_reason = reasons[0] if reasons else "hold"
+    def _emit_decision(
+        self,
+        symbol: str,
+        timeframe: str,
+        ts: datetime,
+        decision: str,
+        reasons: list[str],
+        tuning_version: int | None = None,
+    ) -> None:
+        effective_reasons = list(reasons)
+        if tuning_version is not None:
+            effective_reasons = [f"tuning_version=v{tuning_version}", *effective_reasons]
+
+        first_reason = effective_reasons[0] if effective_reasons else "hold"
         if decision in {"enter_long", "enter_short"}:
             state = "position_opened"
         elif decision == "exit":
@@ -236,7 +291,7 @@ class Simple1mRuntime:
             timeframe=timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             state=state,
-            note=", ".join(reasons)[:256] if reasons else None,
+            note=", ".join(effective_reasons)[:256] if effective_reasons else None,
             log_event=True,
         )
 
@@ -249,7 +304,7 @@ class Simple1mRuntime:
                     "timeframe": timeframe,
                     "ts": ts.isoformat(),
                     "decision": decision,
-                    "reasons": reasons,
+                    "reasons": effective_reasons,
                 },
                 separators=(",", ":"),
                 sort_keys=True,
@@ -327,6 +382,7 @@ class Simple1mRuntime:
             return
 
         params = self.params_resolver.for_symbol(symbol)
+        tuning_version = self.params_resolver.version_for_symbol(symbol)
         frame = self.candle_repo.get_candles(
             symbol=symbol,
             timeframe=timeframe,
@@ -368,19 +424,17 @@ class Simple1mRuntime:
 
         bb_dev = self._bb_deviation(prev)
         if bb_dev is None or pd.isna(prev.get("atr")) or pd.isna(prev.get("close")):
-            self._emit_decision(symbol, timeframe, ts, "hold", ["missing_indicators"])
+            self._emit_decision(symbol, timeframe, ts, "hold", ["missing_indicators"], tuning_version=tuning_version)
             return
 
         ema_fast_col = f"ema{params.ema_fast}"
         ema_slow_col = f"ema{params.ema_slow}"
         slope_now, slope_lookback = self._ema_slope(out, i, ema_fast_col, max(2, params.slope_lookback_bars))
         if slope_now is None or slope_lookback is None:
-            self._emit_decision(symbol, timeframe, ts, "hold", ["missing_ema_slope"])
+            self._emit_decision(symbol, timeframe, ts, "hold", ["missing_ema_slope"], tuning_version=tuning_version)
             return
 
         flatten_ratio = abs(slope_now) / max(abs(slope_lookback), 1e-12)
-        long_rounding = slope_now > slope_lookback and slope_now < 0 and flatten_ratio <= params.slope_flatten_factor
-        short_rounding = slope_now < slope_lookback and slope_now > 0 and flatten_ratio <= params.slope_flatten_factor
 
         ema_fast = float(prev[ema_fast_col])
         ema_slow = float(prev[ema_slow_col])
@@ -389,8 +443,8 @@ class Simple1mRuntime:
         long_allowed = trade_side_mode in {"long_only", "long_short"}
         short_allowed = trade_side_mode in {"short_only", "long_short"}
 
-        long_signal = long_allowed and bb_dev <= -params.bb_entry_deviation and ema_fast <= ema_slow and long_rounding and close <= ema_fast
-        short_signal = short_allowed and bb_dev >= params.bb_entry_deviation and ema_fast >= ema_slow and short_rounding and close >= ema_fast
+        long_signal = long_allowed and bb_dev <= -params.bb_entry_deviation and ema_fast <= ema_slow and close <= ema_fast
+        short_signal = short_allowed and bb_dev >= params.bb_entry_deviation and ema_fast >= ema_slow and close >= ema_fast
 
         if open_position is None:
             chosen_side: str | None = "long" if long_signal else ("short" if short_signal else None)
@@ -408,6 +462,7 @@ class Simple1mRuntime:
                         f"slope_lookback={slope_lookback:.8f}",
                         f"flatten_ratio={flatten_ratio:.3f}",
                     ],
+                    tuning_version=tuning_version,
                 )
                 return
 
@@ -434,7 +489,7 @@ class Simple1mRuntime:
                 max_entries_per_day=int(cfg.max_entries_per_day),
             )
             if guard.blocked_reason is not None:
-                self._emit_decision(symbol, timeframe, ts, "hold", [guard.blocked_reason])
+                self._emit_decision(symbol, timeframe, ts, "hold", [guard.blocked_reason], tuning_version=tuning_version)
                 return
 
             sizing = compute_entry_sizing(
@@ -482,7 +537,14 @@ class Simple1mRuntime:
                 take_profit_price=take_profit_price,
                 last_price=float(bar["close"]),
             )
-            self._emit_decision(symbol, timeframe, ts, "enter_long" if chosen_side == "long" else "enter_short", [f"bb_dev={bb_dev:.3f}", f"flatten_ratio={flatten_ratio:.3f}"])
+            self._emit_decision(
+                symbol,
+                timeframe,
+                ts,
+                "enter_long" if chosen_side == "long" else "enter_short",
+                [f"bb_dev={bb_dev:.3f}", f"flatten_ratio={flatten_ratio:.3f}"],
+                tuning_version=tuning_version,
+            )
             return
 
         hold_bars = int(open_position.hold_bars) + 1
@@ -509,7 +571,7 @@ class Simple1mRuntime:
 
         if not (stop_hit or tp_hit or signal_exit or timed_exit):
             self.trading_repo.touch_position(open_position, hold_bars=hold_bars, last_price=float(bar["close"]))
-            self._emit_decision(symbol, timeframe, ts, "hold", ["position_open"])
+            self._emit_decision(symbol, timeframe, ts, "hold", ["position_open"], tuning_version=tuning_version)
             return
 
         if stop_hit:
@@ -546,5 +608,5 @@ class Simple1mRuntime:
             exit_reason=exit_reason,
             exit_fee=float(exit_fill.fee_usd),
         )
-        self._emit_decision(symbol, timeframe, ts, "exit", [exit_reason])
+        self._emit_decision(symbol, timeframe, ts, "exit", [exit_reason], tuning_version=tuning_version)
 

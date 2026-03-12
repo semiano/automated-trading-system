@@ -123,6 +123,11 @@ class AssetControlOut(BaseModel):
     last_evaluated_state: str | None
     last_evaluated_note: str | None
     tuning_params: dict[str, float | int | str | bool]
+    tuning_version: int | None = None
+    tuning_note: str | None = None
+    tuning_source: str | None = None
+    tuning_updated_by: str | None = None
+    tuning_updated_at: datetime | None = None
     live_balance: dict[str, float | str | bool] | None = None
 
 
@@ -131,6 +136,39 @@ class AssetControlUpdate(BaseModel):
     execution_mode: str | None = None
     trade_side: str | None = None
     soft_risk_limit_usd: float | None = Field(default=None, ge=0.0)
+
+
+class AssetTuningUpdate(BaseModel):
+    bb_length: int | None = Field(default=None, ge=2)
+    bb_stdev: float | None = Field(default=None, gt=0.0)
+    atr_length: int | None = Field(default=None, ge=2)
+    ema_fast: int | None = Field(default=None, ge=2)
+    ema_slow: int | None = Field(default=None, ge=2)
+    bb_entry_deviation: float | None = Field(default=None, ge=0.0)
+    bb_exit_deviation: float | None = Field(default=None, ge=0.0)
+    slope_lookback_bars: int | None = Field(default=None, ge=1)
+    slope_flatten_factor: float | None = Field(default=None, ge=0.0)
+    stop_atr: float | None = Field(default=None, gt=0.0)
+    take_profit_atr: float | None = Field(default=None, gt=0.0)
+    max_hold_bars: int | None = Field(default=None, ge=1)
+    min_hold_bars: int | None = Field(default=None, ge=0)
+    max_take_profit_pct: float | None = Field(default=None, ge=0.0)
+    note: str | None = Field(default=None, max_length=512)
+    source: str | None = Field(default=None, max_length=64)
+    updated_by: str | None = Field(default=None, max_length=128)
+
+
+class AssetTuningVersionOut(BaseModel):
+    id: int
+    symbol: str
+    timeframe: str
+    version: int
+    params_json: dict[str, float | int]
+    note: str | None
+    source: str | None
+    updated_by: str | None
+    is_active: bool
+    created_at: datetime
 
 
 class AssetEngineLogOut(BaseModel):

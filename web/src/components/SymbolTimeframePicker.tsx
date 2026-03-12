@@ -12,12 +12,14 @@ type Props = {
 };
 
 export default function SymbolTimeframePicker(props: Props) {
+  const uniqueSymbols = Array.from(new Set(props.symbols));
+
   return (
     <div style={{ display: "flex", gap: 12, padding: 12, alignItems: "center", borderBottom: "1px solid #22262f" }}>
       <label>
         Symbol
         <select value={props.symbol} onChange={(e) => props.onSymbol(e.target.value)} style={{ marginLeft: 6 }}>
-          {props.symbols.map((sym) => (
+          {uniqueSymbols.map((sym) => (
             <option key={sym} value={sym}>
               {sym} {props.symbolStatus[sym] === "stale" ? "🔴 Stale" : "🟢 Up-to-date"}
             </option>

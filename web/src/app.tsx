@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, fetchAssetControls, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateRiskPolicySettings, valueBalanceAsset } from "./api/client";
-import type { AssetControl, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
+import { API_BASE_URL, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateAssetTuning, updateRiskPolicySettings, valueBalanceAsset } from "./api/client";
+import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
 import IngestionStatusPage from "./components/IngestionStatusPage";
@@ -67,6 +67,16 @@ function mergeClosedTradesByTimeframe(parts: ClosedTrade[][]): ClosedTrade[] {
     }
   }
   return Array.from(byId.values()).sort((a, b) => Date.parse(b.exit_ts) - Date.parse(a.exit_ts));
+}
+
+async function fetchAllAssetControls(): Promise<AssetControl[]> {
+  // Let backend decide which control-plane timeframes are supported.
+  // This avoids creating unsupported timeframe rows (e.g., 1h) on read paths.
+  const rows = await fetchAssetControls();
+  if (rows.length > 0) {
+    return rows;
+  }
+  return fetchAssetControls();
 }
 
 export default function App() {
@@ -161,10 +171,12 @@ export default function App() {
 
   const activeSymbols = useMemo(() => {
     if (assetControls.length > 0) {
-      return assetControls.map((row) => row.symbol);
+      const byTf = assetControls.filter((row) => row.timeframe === timeframe);
+      const source = byTf.length > 0 ? byTf : assetControls;
+      return Array.from(new Set(source.map((row) => row.symbol)));
     }
-    return symbols;
-  }, [assetControls, symbols]);
+    return Array.from(new Set(symbols));
+  }, [assetControls, symbols, timeframe]);
 
   const isSelectedSymbolActive = useMemo(() => activeSymbols.includes(symbol), [activeSymbols, symbol]);
 
@@ -275,7 +287,7 @@ export default function App() {
           setPortfolioInfo(null);
         });
 
-      await fetchAssetControls()
+      await fetchAllAssetControls()
         .then(setAssetControls)
         .catch(() => {
           setAssetControls([]);
@@ -319,7 +331,7 @@ export default function App() {
   }, [venue]);
 
   const refreshAssetControls = async () => {
-    const rows = await fetchAssetControls();
+    const rows = await fetchAllAssetControls();
     setAssetControls(rows);
   };
 
@@ -350,6 +362,35 @@ export default function App() {
   }) => {
     await valueBalanceAsset(payload);
     await refreshAssetControls();
+  };
+
+  const saveAssetTuning = async (payload: {
+    symbol: string;
+    timeframe: string;
+    bb_length?: number;
+    bb_stdev?: number;
+    atr_length?: number;
+    ema_fast?: number;
+    ema_slow?: number;
+    bb_entry_deviation?: number;
+    bb_exit_deviation?: number;
+    slope_lookback_bars?: number;
+    slope_flatten_factor?: number;
+    stop_atr?: number;
+    take_profit_atr?: number;
+    max_hold_bars?: number;
+    min_hold_bars?: number;
+    max_take_profit_pct?: number;
+    note?: string;
+    source?: string;
+    updated_by?: string;
+  }) => {
+    await updateAssetTuning(payload);
+    await refreshAssetControls();
+  };
+
+  const loadAssetTuningVersions = async (payload: { symbol: string; timeframe: string; limit?: number }): Promise<AssetTuningVersion[]> => {
+    return fetchAssetTuningVersions(payload);
   };
 
   const handleGoToTradeChart = (trade: ClosedTrade) => {
@@ -515,6 +556,8 @@ export default function App() {
           pnlMode={pnlMode}
           onPnlMode={setPnlMode}
           onSaveAssetControl={saveAssetControl}
+          onSaveAssetTuning={saveAssetTuning}
+          onFetchAssetTuningVersions={loadAssetTuningVersions}
           onValueBalanceAsset={rebalanceAssetValue}
           onSaveRiskPolicy={saveRiskPolicy}
           onGoToTradeChart={handleGoToTradeChart}

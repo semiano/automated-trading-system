@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAssetLogs } from "../api/client";
-import type { AssetControl, AssetEngineLog, ClosedTrade, OpenPosition, RiskPolicySettings } from "../api/types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, OpenPosition, RiskPolicySettings } from "../api/types";
 import { num } from "../utils/formatting";
 
 type Props = {
@@ -19,6 +19,28 @@ type Props = {
     trade_side?: "long_only" | "long_short" | "short_only";
     soft_risk_limit_usd?: number;
   }) => Promise<void>;
+  onSaveAssetTuning: (payload: {
+    symbol: string;
+    timeframe: string;
+    bb_length?: number;
+    bb_stdev?: number;
+    atr_length?: number;
+    ema_fast?: number;
+    ema_slow?: number;
+    bb_entry_deviation?: number;
+    bb_exit_deviation?: number;
+    slope_lookback_bars?: number;
+    slope_flatten_factor?: number;
+    stop_atr?: number;
+    take_profit_atr?: number;
+    max_hold_bars?: number;
+    min_hold_bars?: number;
+    max_take_profit_pct?: number;
+    note?: string;
+    source?: string;
+    updated_by?: string;
+  }) => Promise<void>;
+  onFetchAssetTuningVersions: (payload: { symbol: string; timeframe: string; limit?: number }) => Promise<AssetTuningVersion[]>;
   onValueBalanceAsset: (payload: {
     symbol: string;
     target_base_ratio?: number;
@@ -57,13 +79,21 @@ function usd(value: number): string {
   return value.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onValueBalanceAsset, onSaveRiskPolicy, onGoToTradeChart }: Props) {
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset, onSaveRiskPolicy, onGoToTradeChart }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
   const [draftPortfolioLimit, setDraftPortfolioLimit] = useState<string>(String(riskPolicy.portfolio_soft_risk_limit_usd));
   const [saving, setSaving] = useState(false);
   const [logSymbol, setLogSymbol] = useState<string | null>(null);
   const [logRows, setLogRows] = useState<AssetEngineLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [tuningRow, setTuningRow] = useState<AssetControl | null>(null);
+  const [tuningDraft, setTuningDraft] = useState<Record<string, string>>({});
+  const [tuningNote, setTuningNote] = useState<string>("");
+  const [tuningSource, setTuningSource] = useState<string>("");
+  const [tuningUpdatedBy, setTuningUpdatedBy] = useState<string>("");
+  const [tuningVersions, setTuningVersions] = useState<AssetTuningVersion[]>([]);
+  const [tuningLoading, setTuningLoading] = useState(false);
+  const [tuningSaving, setTuningSaving] = useState(false);
   const [rebalancingSymbol, setRebalancingSymbol] = useState<string | null>(null);
   const [filterSymbol, setFilterSymbol] = useState<string>("all");
   const [filterTimeframe, setFilterTimeframe] = useState<string>("all");
@@ -160,6 +190,71 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     return state;
   };
 
+  const editableTuningFields = [
+    "bb_length",
+    "bb_stdev",
+    "atr_length",
+    "ema_fast",
+    "ema_slow",
+    "bb_entry_deviation",
+    "bb_exit_deviation",
+    "slope_lookback_bars",
+    "slope_flatten_factor",
+    "stop_atr",
+    "take_profit_atr",
+    "max_hold_bars",
+    "min_hold_bars",
+    "max_take_profit_pct",
+  ] as const;
+
+  const openTuningPopover = async (row: AssetControl) => {
+    setTuningRow(row);
+    const nextDraft: Record<string, string> = {};
+    for (const key of editableTuningFields) {
+      const value = row.tuning_params[key];
+      nextDraft[key] = typeof value === "number" ? String(value) : "";
+    }
+    setTuningDraft(nextDraft);
+    setTuningNote(row.tuning_note ?? "");
+    setTuningSource(row.tuning_source ?? "manual");
+    setTuningUpdatedBy(row.tuning_updated_by ?? "");
+    setTuningLoading(true);
+    try {
+      const versions = await onFetchAssetTuningVersions({ symbol: row.symbol, timeframe: row.timeframe, limit: 30 });
+      setTuningVersions(versions);
+    } finally {
+      setTuningLoading(false);
+    }
+  };
+
+  const saveTuningFromPopover = async () => {
+    if (!tuningRow) return;
+    const payload: Record<string, string | number | undefined> = {
+      symbol: tuningRow.symbol,
+      timeframe: tuningRow.timeframe,
+      note: tuningNote || undefined,
+      source: tuningSource || undefined,
+      updated_by: tuningUpdatedBy || undefined,
+    };
+    for (const key of editableTuningFields) {
+      const raw = tuningDraft[key]?.trim();
+      if (!raw) continue;
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        payload[key] = parsed;
+      }
+    }
+
+    setTuningSaving(true);
+    try {
+      await onSaveAssetTuning(payload as Parameters<Props["onSaveAssetTuning"]>[0]);
+      const versions = await onFetchAssetTuningVersions({ symbol: tuningRow.symbol, timeframe: tuningRow.timeframe, limit: 30 });
+      setTuningVersions(versions);
+    } finally {
+      setTuningSaving(false);
+    }
+  };
+
   const orderedClosedTrades = useMemo(
     () => [...closedTrades].sort((a, b) => Date.parse(a.exit_ts) - Date.parse(b.exit_ts)),
     [closedTrades]
@@ -241,13 +336,21 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     const domainSpan = Math.max(domainMax - domainMin, 1e-9);
 
     const yFor = (value: number) => chartMargins.top + innerHeight - ((value - domainMin) / domainSpan) * innerHeight;
-    const xFor = (index: number) =>
+
+    const tradeTimes = filteredClosedTrades.map((trade, index) => {
+      const t = Date.parse(trade.exit_ts);
+      return Number.isNaN(t) ? index : t;
+    });
+    const minTime = Math.min(...tradeTimes);
+    const maxTime = Math.max(...tradeTimes);
+    const timeSpan = Math.max(maxTime - minTime, 1);
+    const xFor = (timeMs: number) =>
       chartValues.length === 1
         ? chartMargins.left + innerWidth / 2
-        : chartMargins.left + (index / (chartValues.length - 1)) * innerWidth;
+        : chartMargins.left + ((timeMs - minTime) / timeSpan) * innerWidth;
 
     const dots = chartValues.map((value, index) => ({
-      x: xFor(index),
+      x: xFor(tradeTimes[index]),
       y: yFor(value),
       value,
       timeframe: filteredClosedTrades[index]?.timeframe ?? "1m",
@@ -261,7 +364,18 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
       return { value, y: chartMargins.top + frac * innerHeight };
     });
 
-    return { dots, points, ticks, yFor };
+    const dayGridLines: Array<{ x: number; label: string }> = [];
+    const startDay = new Date(minTime);
+    startDay.setHours(0, 0, 0, 0);
+    if (startDay.getTime() < minTime) {
+      startDay.setDate(startDay.getDate() + 1);
+    }
+    const endTime = maxTime;
+    for (let t = startDay.getTime(); t <= endTime; t += 86_400_000) {
+      dayGridLines.push({ x: xFor(t), label: new Date(t).toLocaleDateString() });
+    }
+
+    return { dots, points, ticks, yFor, dayGridLines };
   }, [chartValues, filteredClosedTrades]);
 
   const activeHoverIndex = hoveredIndex !== null && chartStats && hoveredIndex >= 0 && hoveredIndex < chartStats.dots.length
@@ -597,8 +711,28 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   <td style={{ padding: 8 }}>
                     <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:next`)}>{formatCountdown(row.next_run_ts)}</span>
                   </td>
-                  <td style={{ padding: 8, maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {Object.entries(row.tuning_params).map(([k, v]) => `${k}=${v}`).join(", ")}
+                  <td style={{ padding: 8, maxWidth: 360 }}>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => {
+                        void openTuningPopover(row);
+                      }}
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 4,
+                        border: "1px solid #2d3340",
+                        background: "#2d3340",
+                        color: "inherit",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Tuning Params
+                    </button>
+                    <div style={{ marginTop: 4, color: "#9ca3af", fontSize: 11 }}>
+                      v{row.tuning_version ?? 0}
+                      {row.tuning_source ? ` • ${row.tuning_source}` : ""}
+                    </div>
                   </td>
                   <td style={{ padding: 8, minWidth: 290 }}>
                     {row.execution_mode !== "live" ? (
@@ -691,6 +825,135 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
           </table>
         </div>
       </section>
+
+      {tuningRow && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 55,
+          }}
+          onClick={() => setTuningRow(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1040px, 94vw)",
+              maxHeight: "86vh",
+              overflow: "hidden",
+              background: "#0f131c",
+              border: "1px solid #2d3340",
+              borderRadius: 8,
+              display: "grid",
+              gridTemplateRows: "auto 1fr",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #2d3340" }}>
+              <strong>Tuning Params — {tuningRow.symbol} ({tuningRow.timeframe})</strong>
+              <button type="button" onClick={() => setTuningRow(null)} style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: "transparent", color: "inherit", cursor: "pointer" }}>
+                Close
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12, padding: 12, overflow: "auto" }}>
+              <div style={{ display: "grid", gap: 8, alignContent: "start" }}>
+                <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(2, minmax(180px, 1fr))" }}>
+                  {editableTuningFields.map((field) => (
+                    <label key={field} style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                      <span style={{ color: "#9ca3af" }}>{field}</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={tuningDraft[field] ?? ""}
+                        onChange={(e) => setTuningDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+                        style={{ padding: "5px 7px", background: "#0b0f16", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                    <span style={{ color: "#9ca3af" }}>Source (example: automated_backtest, manual)</span>
+                    <input
+                      type="text"
+                      value={tuningSource}
+                      onChange={(e) => setTuningSource(e.target.value)}
+                      style={{ padding: "5px 7px", background: "#0b0f16", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                    <span style={{ color: "#9ca3af" }}>Updated By</span>
+                    <input
+                      type="text"
+                      value={tuningUpdatedBy}
+                      onChange={(e) => setTuningUpdatedBy(e.target.value)}
+                      style={{ padding: "5px 7px", background: "#0b0f16", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                    <span style={{ color: "#9ca3af" }}>Version Note</span>
+                    <textarea
+                      value={tuningNote}
+                      onChange={(e) => setTuningNote(e.target.value)}
+                      rows={3}
+                      style={{ padding: "6px 8px", background: "#0b0f16", color: "inherit", border: "1px solid #2d3340", borderRadius: 4, resize: "vertical" }}
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    disabled={tuningSaving}
+                    onClick={() => {
+                      void saveTuningFromPopover();
+                    }}
+                    style={{ padding: "5px 10px", borderRadius: 4, border: "1px solid #2d3340", background: "#2d3340", color: "inherit", cursor: "pointer" }}
+                  >
+                    {tuningSaving ? "Saving..." : "Save New Version"}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ borderLeft: "1px solid #1b1f29", paddingLeft: 12, minHeight: 260 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Version History</div>
+                {tuningLoading ? (
+                  <div style={{ fontSize: 12 }}>Loading versions...</div>
+                ) : tuningVersions.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>No saved tuning versions yet.</div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", padding: 6 }}>Version</th>
+                        <th style={{ textAlign: "left", padding: 6 }}>When</th>
+                        <th style={{ textAlign: "left", padding: 6 }}>Source</th>
+                        <th style={{ textAlign: "left", padding: 6 }}>Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tuningVersions.map((v) => (
+                        <tr key={v.id} style={{ borderTop: "1px solid #1b1f29" }}>
+                          <td style={{ padding: 6 }}>
+                            v{v.version} {v.is_active ? <span style={{ color: "#85e89d" }}>(active)</span> : null}
+                          </td>
+                          <td style={{ padding: 6 }}>{new Date(v.created_at).toLocaleString()}</td>
+                          <td style={{ padding: 6 }}>{v.source ?? "-"}</td>
+                          <td style={{ padding: 6 }}>{v.note ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {logSymbol && (
         <div
@@ -841,6 +1104,22 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   <line x1={chartMargins.left} y1={tick.y} x2={chartWidth - chartMargins.right} y2={tick.y} stroke="#1f2a3a" strokeWidth={1} />
                   <text x={chartMargins.left - 8} y={tick.y + 4} textAnchor="end" fontSize={10} fill="#93a3b8">
                     {yMode === "pct" ? `${num(tick.value, 2)}%` : num(tick.value, 4)}
+                  </text>
+                </g>
+              ))}
+
+              {chartStats.dayGridLines.map((line, idx) => (
+                <g key={`day-grid-${idx}`}>
+                  <line
+                    x1={line.x}
+                    y1={chartMargins.top}
+                    x2={line.x}
+                    y2={chartHeight - chartMargins.bottom}
+                    stroke="#1f2a3a"
+                    strokeWidth={1}
+                  />
+                  <text x={line.x} y={chartHeight - 8} textAnchor="middle" fontSize={9} fill="#7f8ea3">
+                    {line.label}
                   </text>
                 </g>
               ))}

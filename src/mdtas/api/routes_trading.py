@@ -8,6 +8,8 @@ from mdtas.api.schemas import (
     AssetEngineLogOut,
     AssetControlOut,
     AssetControlUpdate,
+    AssetTuningUpdate,
+    AssetTuningVersionOut,
     ClosedTradeOut,
     ClosedTradesResponse,
     AssetValueBalanceOut,
@@ -27,6 +29,22 @@ from mdtas.trading.runtime_5m_simple import Simple5mParamResolver
 
 router = APIRouter(tags=["trading"])
 SYSTEM_TRADER_SYMBOL = "__SYSTEM__/TRADER"
+_SIMPLE_TUNING_FIELDS = {
+    "bb_length",
+    "bb_stdev",
+    "atr_length",
+    "ema_fast",
+    "ema_slow",
+    "bb_entry_deviation",
+    "bb_exit_deviation",
+    "slope_lookback_bars",
+    "slope_flatten_factor",
+    "stop_atr",
+    "take_profit_atr",
+    "max_hold_bars",
+    "min_hold_bars",
+    "max_take_profit_pct",
+}
 
 
 def get_repo(session: Session = Depends(get_session)):
@@ -125,6 +143,16 @@ def _control_plane_timeframes(cfg) -> list[str]:
     for tf in ordered:
         if tf and tf not in out:
             out.append(tf)
+    return out
+
+
+def _merged_simple_tuning_params(*, base: dict[str, float | int], override: dict[str, float | int] | None) -> dict[str, float | int]:
+    out = dict(base)
+    if not override:
+        return out
+    for key, value in override.items():
+        if key in _SIMPLE_TUNING_FIELDS:
+            out[key] = value
     return out
 
 
@@ -278,6 +306,8 @@ def list_asset_controls(
     repo: TradingRepository = Depends(get_repo),
 ):
     cfg = get_config()
+    if timeframe is not None and timeframe not in _control_plane_timeframes(cfg):
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe}")
     requested_timeframes = [timeframe] if timeframe else _control_plane_timeframes(cfg)
     base_resolver = AssetParamResolver(cfg)
     simple_1m_resolver = Simple1mParamResolver(cfg)
@@ -318,6 +348,8 @@ def list_asset_controls(
         base_params = base_resolver.for_symbol(item.symbol)
         simple_1m_params = simple_1m_resolver.for_symbol(item.symbol)
         simple_params = simple_5m_resolver.for_symbol(item.symbol)
+        tuning_version = repo.latest_asset_tuning_version(symbol=item.symbol, timeframe=requested_timeframe)
+        tuning_override = tuning_version.params_json if tuning_version is not None else None
         live_balance = None
         if item.execution_mode == "live":
             live_adapter = live_adapters.get(requested_timeframe)
@@ -337,7 +369,7 @@ def list_asset_controls(
                 live_balance = {"status": "error", "note": live_adapter_error}
 
         if requested_timeframe == cfg.trading_1m.runtime_timeframe:
-            tuning_params = {
+            tuning_params_base = {
                 "bb_length": simple_1m_params.bb_length,
                 "bb_stdev": simple_1m_params.bb_stdev,
                 "atr_length": simple_1m_params.atr_length,
@@ -359,9 +391,10 @@ def list_asset_controls(
                 "max_entries_per_day": cfg.trading_1m.max_entries_per_day,
                 "htf_rsi_timeframe": cfg.trading_1m.htf_rsi_timeframe,
             }
+            tuning_params = _merged_simple_tuning_params(base=tuning_params_base, override=tuning_override)
             bb_entry_mode = "range_revert"
         elif requested_timeframe == cfg.trading_5m.runtime_timeframe:
-            tuning_params = {
+            tuning_params_base = {
                 "bb_length": simple_params.bb_length,
                 "bb_stdev": simple_params.bb_stdev,
                 "atr_length": simple_params.atr_length,
@@ -383,6 +416,7 @@ def list_asset_controls(
                 "max_entries_per_day": cfg.trading_5m.max_entries_per_day,
                 "htf_rsi_timeframe": cfg.trading_5m.htf_rsi_timeframe,
             }
+            tuning_params = _merged_simple_tuning_params(base=tuning_params_base, override=tuning_override)
             bb_entry_mode = "range_revert"
         else:
             tuning_params = {
@@ -420,6 +454,11 @@ def list_asset_controls(
                 last_evaluated_note=item.last_evaluated_note,
                 live_balance=live_balance,
                 tuning_params=tuning_params,
+                tuning_version=tuning_version.version if tuning_version is not None else None,
+                tuning_note=tuning_version.note if tuning_version is not None else None,
+                tuning_source=tuning_version.source if tuning_version is not None else None,
+                tuning_updated_by=tuning_version.updated_by if tuning_version is not None else None,
+                tuning_updated_at=tuning_version.created_at if tuning_version is not None else None,
             )
         )
     return out
@@ -456,57 +495,131 @@ def update_asset_control(
         soft_risk_limit_usd=payload.soft_risk_limit_usd,
     )
 
-    requested_timeframe = timeframe
-    runtime_cfg = _runtime_config_for_timeframe(cfg, requested_timeframe)
-    resolver = AssetParamResolver(cfg)
-    params = resolver.for_symbol(item.symbol)
-    live_balance = None
-    if item.execution_mode == "live" and cfg.trading.execution_adapter == "real":
-        try:
-            live_balance = _live_balance_snapshot(
-                cfg=cfg,
-                runtime_cfg=runtime_cfg,
-                adapter=_build_live_adapter(cfg, runtime_cfg),
-                symbol=item.symbol,
-                trade_side=item.trade_side,
-            )
-        except Exception as exc:  # noqa: BLE001
-            live_balance = {"status": "error", "note": str(exc)}
-    risk = repo.current_open_risk_usd(
-        symbol=item.symbol,
-        venue=cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock",
-        timeframe=cfg.trading.runtime_timeframe,
-        execution_mode=item.execution_mode,
+    refreshed = list_asset_controls(timeframe=timeframe, _auth=None, repo=repo)
+    for row in refreshed:
+        if row.symbol == symbol and row.timeframe == timeframe:
+            return row
+
+    raise HTTPException(status_code=500, detail="Updated control row not found")
+
+
+@router.put("/control-plane/asset-tuning/{symbol:path}", response_model=AssetControlOut)
+def update_asset_tuning(
+    symbol: str,
+    payload: AssetTuningUpdate,
+    timeframe: str = Query(...),
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
+    cfg = get_config()
+    if symbol not in cfg.symbols:
+        raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
+    if timeframe not in _control_plane_timeframes(cfg):
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe}")
+
+    meta_note = payload.note
+    meta_source = payload.source
+    meta_updated_by = payload.updated_by
+    updates = payload.model_dump(exclude_none=True, exclude={"note", "source", "updated_by"})
+    if not updates:
+        raise HTTPException(status_code=422, detail="No tuning fields provided")
+
+    unsupported = sorted(set(updates) - _SIMPLE_TUNING_FIELDS)
+    if unsupported:
+        raise HTTPException(status_code=422, detail=f"Unsupported tuning fields: {', '.join(unsupported)}")
+
+    if timeframe == cfg.trading_1m.runtime_timeframe:
+        base_params = Simple1mParamResolver(cfg).for_symbol(symbol)
+        merged = _merged_simple_tuning_params(
+            base={
+                "bb_length": base_params.bb_length,
+                "bb_stdev": base_params.bb_stdev,
+                "atr_length": base_params.atr_length,
+                "ema_fast": base_params.ema_fast,
+                "ema_slow": base_params.ema_slow,
+                "bb_entry_deviation": base_params.bb_entry_deviation,
+                "bb_exit_deviation": base_params.bb_exit_deviation,
+                "slope_lookback_bars": base_params.slope_lookback_bars,
+                "slope_flatten_factor": base_params.slope_flatten_factor,
+                "stop_atr": base_params.stop_atr,
+                "take_profit_atr": base_params.take_profit_atr,
+                "max_hold_bars": base_params.max_hold_bars,
+                "min_hold_bars": base_params.min_hold_bars,
+                "max_take_profit_pct": base_params.max_take_profit_pct,
+            },
+            override={k: updates[k] for k in updates if k in _SIMPLE_TUNING_FIELDS},
+        )
+    elif timeframe == cfg.trading_5m.runtime_timeframe:
+        base_params = Simple5mParamResolver(cfg).for_symbol(symbol)
+        merged = _merged_simple_tuning_params(
+            base={
+                "bb_length": base_params.bb_length,
+                "bb_stdev": base_params.bb_stdev,
+                "atr_length": base_params.atr_length,
+                "ema_fast": base_params.ema_fast,
+                "ema_slow": base_params.ema_slow,
+                "bb_entry_deviation": base_params.bb_entry_deviation,
+                "bb_exit_deviation": base_params.bb_exit_deviation,
+                "slope_lookback_bars": base_params.slope_lookback_bars,
+                "slope_flatten_factor": base_params.slope_flatten_factor,
+                "stop_atr": base_params.stop_atr,
+                "take_profit_atr": base_params.take_profit_atr,
+                "max_hold_bars": base_params.max_hold_bars,
+                "min_hold_bars": base_params.min_hold_bars,
+                "max_take_profit_pct": base_params.max_take_profit_pct,
+            },
+            override={k: updates[k] for k in updates if k in _SIMPLE_TUNING_FIELDS},
+        )
+    else:
+        raise HTTPException(status_code=422, detail=f"Tuning updates are unsupported for timeframe: {timeframe}")
+
+    repo.create_asset_tuning_version(
+        symbol=symbol,
+        timeframe=timeframe,
+        params_json=merged,
+        note=meta_note,
+        source=meta_source,
+        updated_by=meta_updated_by,
     )
 
-    return AssetControlOut(
-        symbol=item.symbol,
-        timeframe=requested_timeframe,
-        enabled=bool(item.enabled),
-        execution_mode=item.execution_mode,
-        trade_side=item.trade_side,
-        bb_entry_mode=cfg.trading.bb_entry_mode,
-        soft_risk_limit_usd=float(item.soft_risk_limit_usd),
-        current_risk_usd=float(risk),
-        last_run_ts=item.last_run_ts,
-        next_run_ts=item.next_run_ts,
-        last_evaluated_state=item.last_evaluated_state,
-        last_evaluated_note=item.last_evaluated_note,
-        live_balance=live_balance,
-        tuning_params={
-            "rsi_length": params.rsi_length,
-            "atr_length": params.atr_length,
-            "ema_fast": params.ema_fast,
-            "ema_slow": params.ema_slow,
-            "rsi_entry": params.rsi_entry,
-            "rsi_exit": params.rsi_exit,
-            "stop_atr": params.stop_atr,
-            "take_profit_atr": params.take_profit_atr,
-            "max_hold_bars": params.max_hold_bars,
-            "min_entry_atr_pct": cfg.trading.min_entry_atr_pct,
-            "min_hold_bars_before_signal_exit": cfg.trading.min_hold_bars_before_signal_exit,
-        },
-    )
+    refreshed = list_asset_controls(timeframe=timeframe, _auth=None, repo=repo)
+    for row in refreshed:
+        if row.symbol == symbol and row.timeframe == timeframe:
+            return row
+
+    raise HTTPException(status_code=500, detail="Updated control row not found")
+
+
+@router.get("/control-plane/asset-tuning/{symbol:path}", response_model=list[AssetTuningVersionOut])
+def list_asset_tuning_versions(
+    symbol: str,
+    timeframe: str = Query(...),
+    limit: int = Query(default=25, ge=1, le=200),
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
+    cfg = get_config()
+    if symbol not in cfg.symbols:
+        raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
+    if timeframe not in _control_plane_timeframes(cfg):
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe}")
+
+    rows = repo.list_asset_tuning_versions(symbol=symbol, timeframe=timeframe, limit=limit)
+    return [
+        AssetTuningVersionOut(
+            id=row.id,
+            symbol=row.symbol,
+            timeframe=row.timeframe,
+            version=row.version,
+            params_json=row.params_json,
+            note=row.note,
+            source=row.source,
+            updated_by=row.updated_by,
+            is_active=bool(row.is_active),
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 @router.post("/control-plane/assets/{symbol:path}/value-balance", response_model=AssetValueBalanceOut)

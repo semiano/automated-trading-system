@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -182,4 +182,26 @@ class AssetEngineLog(Base):
 
     __table_args__ = (
         Index("idx_asset_engine_logs_symbol_tf_ts", "symbol", "timeframe", "created_at"),
+    )
+
+
+class AssetTuningVersion(Base):
+    __tablename__ = "asset_tuning_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    params_json: Mapped[dict] = mapped_column(JSON)
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), default=func.now(), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "version", name="uq_asset_tuning_symbol_timeframe_version"),
+        Index("idx_asset_tuning_symbol_timeframe_active", "symbol", "timeframe", "is_active"),
     )

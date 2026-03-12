@@ -21,6 +21,19 @@ export type IndicatorRow = Candle & {
   volume_sma?: number | null;
   vwap?: number | null;
   mom_roc?: number | null;
+  bb_deviation?: number | null;
+  entry_deviation?: number | null;
+  slope_now?: number | null;
+  slope_lookback?: number | null;
+  flatten_ratio?: number | null;
+  long_rounding?: boolean | null;
+  short_rounding?: boolean | null;
+  long_entry_signal?: boolean | null;
+  short_entry_signal?: boolean | null;
+  engine_ema_fast?: number | null;
+  engine_ema_slow?: number | null;
+  engine_slope_lookback_bars?: number | null;
+  engine_diag_status?: string | null;
   swing_pivot_low?: boolean | null;
   swing_pivot_high?: boolean | null;
   swing_long_ready?: boolean | null;
@@ -97,6 +110,11 @@ export type AssetControl = {
   last_evaluated_state?: string | null;
   last_evaluated_note?: string | null;
   tuning_params: Record<string, number | string | boolean>;
+  tuning_version?: number | null;
+  tuning_note?: string | null;
+  tuning_source?: string | null;
+  tuning_updated_by?: string | null;
+  tuning_updated_at?: string | null;
   live_balance?: {
     status: string;
     can_long?: boolean;
@@ -109,6 +127,19 @@ export type AssetControl = {
     base_value_ratio?: number;
     note?: string;
   } | null;
+};
+
+export type AssetTuningVersion = {
+  id: number;
+  symbol: string;
+  timeframe: string;
+  version: number;
+  params_json: Record<string, number>;
+  note?: string | null;
+  source?: string | null;
+  updated_by?: string | null;
+  is_active: boolean;
+  created_at: string;
 };
 
 export type AssetValueBalanceResponse = {

@@ -78,6 +78,26 @@ type ThresholdSlidersProps = {
   sideEnabled: boolean;
 };
 
+type EntryDecisionDiagnostics = {
+  evalTs: string | null;
+  actionTs: string | null;
+  hasOpenPosition: boolean;
+  lastExitReason: string | null;
+  barsSinceExit: number | null;
+  cooldownRequiredBars: number;
+  cooldownPass: boolean;
+  entriesLastHour: number;
+  entriesLastDay: number;
+  cadenceHourPass: boolean;
+  cadenceDayPass: boolean;
+  longAllowed: boolean;
+  shortAllowed: boolean;
+  longSignal: boolean | null;
+  shortSignal: boolean | null;
+  expectedAction: "enter_long" | "enter_short" | "hold";
+  actualAction: "enter_long" | "enter_short" | "hold";
+};
+
 function ThresholdSliders({ title, metrics, sideEnabled }: ThresholdSlidersProps) {
   const sliderHeight = 122;
 
@@ -166,6 +186,13 @@ function allTrue(values: Array<boolean | null>): boolean | null {
     return null;
   }
   return values.every((v) => v === true);
+}
+
+function normalizeApiTs(ts: string | null | undefined): string | null {
+  if (!ts) {
+    return null;
+  }
+  return /Z$|[+-]\d{2}:\d{2}$/.test(ts) ? ts : `${ts}Z`;
 }
 
 function computeBbMetric(
@@ -842,7 +869,8 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
     const bbLowerV = evalRow.bb_lower ?? null;
     const bbUpperV = evalRow.bb_upper ?? null;
     const halfWidth = bbMid !== null && bbLowerV !== null && bbUpperV !== null ? (bbUpperV - bbLowerV) * 0.5 : null;
-    const bbDeviation = close !== null && bbMid !== null && halfWidth !== null && halfWidth > 0 ? (close - bbMid) / halfWidth : null;
+    const localBbDeviation = close !== null && bbMid !== null && halfWidth !== null && halfWidth > 0 ? (close - bbMid) / halfWidth : null;
+    const serverBbDeviation = typeof evalRow.bb_deviation === "number" ? evalRow.bb_deviation : null;
 
     const tunedEmaFast = typeof tuning.ema_fast === "number" ? tuning.ema_fast : undefined;
     const tunedEmaSlow = typeof tuning.ema_slow === "number" ? tuning.ema_slow : undefined;
@@ -850,11 +878,13 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
     const tunedFlattenFactor = typeof tuning.slope_flatten_factor === "number" ? tuning.slope_flatten_factor : 0.82;
     const tunedEntryDev = typeof tuning.bb_entry_deviation === "number" ? tuning.bb_entry_deviation : 1.05;
     const tunedExitDev = typeof tuning.bb_exit_deviation === "number" ? tuning.bb_exit_deviation : 0.15;
+    const serverEntryDev = typeof evalRow.entry_deviation === "number" ? evalRow.entry_deviation : null;
 
     const emaFastNow = getEmaValue(evalRow, tunedEmaFast);
     const emaFastPrev = getEmaValue(prevEval, tunedEmaFast);
     const emaSlowNow = getEmaValue(evalRow, tunedEmaSlow);
-    const slopeNow = emaFastNow !== null && emaFastPrev !== null ? emaFastNow - emaFastPrev : null;
+    const localSlopeNow = emaFastNow !== null && emaFastPrev !== null ? emaFastNow - emaFastPrev : null;
+    const serverSlopeNow = typeof evalRow.slope_now === "number" ? evalRow.slope_now : null;
     const slopeLookback =
       rowIndex >= tunedSlopeLookback + 1 && emaFastNow !== null
         ? (() => {
@@ -862,21 +892,32 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
             return lookbackVal !== null ? (emaFastNow - lookbackVal) / tunedSlopeLookback : null;
           })()
       : null;
-    const flattenRatio = slopeNow !== null && slopeLookback !== null ? Math.abs(slopeNow) / Math.max(Math.abs(slopeLookback), 1e-9) : null;
+    const serverSlopeLookback = typeof evalRow.slope_lookback === "number" ? evalRow.slope_lookback : null;
+    const localFlattenRatio = localSlopeNow !== null && slopeLookback !== null ? Math.abs(localSlopeNow) / Math.max(Math.abs(slopeLookback), 1e-9) : null;
+    const serverFlattenRatio = typeof evalRow.flatten_ratio === "number" ? evalRow.flatten_ratio : null;
 
-    const longRounding = slopeNow !== null && slopeLookback !== null && flattenRatio !== null
-      ? slopeNow > slopeLookback && slopeNow < 0 && flattenRatio <= tunedFlattenFactor
-      : null;
-    const shortRounding = slopeNow !== null && slopeLookback !== null && flattenRatio !== null
-      ? slopeNow < slopeLookback && slopeNow > 0 && flattenRatio <= tunedFlattenFactor
-      : null;
+    const bbDeviation = serverBbDeviation ?? localBbDeviation;
+    const slopeNow = serverSlopeNow ?? localSlopeNow;
+    const effectiveSlopeLookback = serverSlopeLookback ?? slopeLookback;
+    const flattenRatio = serverFlattenRatio ?? localFlattenRatio;
 
-    const longEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && longRounding !== null
+    const localLongRounding = slopeNow !== null && effectiveSlopeLookback !== null && flattenRatio !== null
+      ? slopeNow > effectiveSlopeLookback && slopeNow < 0 && flattenRatio <= tunedFlattenFactor
+      : null;
+    const localShortRounding = slopeNow !== null && effectiveSlopeLookback !== null && flattenRatio !== null
+      ? slopeNow < effectiveSlopeLookback && slopeNow > 0 && flattenRatio <= tunedFlattenFactor
+      : null;
+    const longRounding = typeof evalRow.long_rounding === "boolean" ? evalRow.long_rounding : localLongRounding;
+    const shortRounding = typeof evalRow.short_rounding === "boolean" ? evalRow.short_rounding : localShortRounding;
+
+    const localLongEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && longRounding !== null
       ? bbDeviation <= -tunedEntryDev && emaFastNow <= emaSlowNow && close <= emaFastNow && longRounding
       : null;
-    const shortEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && shortRounding !== null
+    const localShortEntry = bbDeviation !== null && emaFastNow !== null && emaSlowNow !== null && close !== null && shortRounding !== null
       ? bbDeviation >= tunedEntryDev && emaFastNow >= emaSlowNow && close >= emaFastNow && shortRounding
       : null;
+    const longEntry = typeof evalRow.long_entry_signal === "boolean" ? evalRow.long_entry_signal : localLongEntry;
+    const shortEntry = typeof evalRow.short_entry_signal === "boolean" ? evalRow.short_entry_signal : localShortEntry;
 
     const longExitSignal = bbDeviation !== null && emaFastNow !== null && close !== null && slopeNow !== null
       ? bbDeviation >= -tunedExitDev || (close >= emaFastNow && slopeNow >= 0)
@@ -888,7 +929,7 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
     return {
       bbDeviation,
       slopeNow,
-      slopeLookback,
+      slopeLookback: effectiveSlopeLookback,
       flattenRatio,
       longRounding,
       shortRounding,
@@ -896,11 +937,328 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
       shortEntry,
       longExitSignal,
       shortExitSignal,
-      entryDeviation: tunedEntryDev,
+      entryDeviation: serverEntryDev ?? tunedEntryDev,
       exitDeviation: tunedExitDev,
       flattenFactor: tunedFlattenFactor,
     };
   }, [timeframe, rowIndex, evalRow, rows, close, tuning]);
+
+  const entryDiagnostics = useMemo<EntryDecisionDiagnostics | null>(() => {
+    if ((timeframe !== "1m" && timeframe !== "5m") || !evalRow || !row || !simpleMechanism) {
+      return null;
+    }
+
+    const evalMs = parseTsMs(evalRow.ts);
+    const openPositionAtEval =
+      tradeWindows.some((w) => evalMs >= w.entryMs && evalMs <= w.exitMs) ||
+      openWindows.some((w) => evalMs >= w.entryMs);
+
+    const lastExit = tradeWindows
+      .filter((w) => w.exitMs <= evalMs)
+      .sort((a, b) => b.exitMs - a.exitMs)[0];
+
+    const barsSinceExit = lastExit ? Math.floor((evalMs - lastExit.exitMs) / timeframeSeconds) : null;
+    const cooldownRequiredBars = lastExit
+      ? (lastExit.exitReason === "stop" ? cooldownBarsAfterStop : cooldownBarsAfterExit)
+      : 0;
+    const cooldownPass = barsSinceExit === null ? true : barsSinceExit >= cooldownRequiredBars;
+
+    const entriesLastHour =
+      tradeWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 3_600_000).length +
+      openWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 3_600_000).length;
+    const entriesLastDay =
+      tradeWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 86_400_000).length +
+      openWindows.filter((w) => w.entryMs <= evalMs && w.entryMs > evalMs - 86_400_000).length;
+
+    const cadenceHourPass = entriesLastHour < maxEntriesPerHour;
+    const cadenceDayPass = entriesLastDay < maxEntriesPerDay;
+
+    const longAllowed = tradeSide !== "short_only";
+    const shortAllowed = tradeSide !== "long_only";
+    const longSignal = longAllowed ? simpleMechanism.longEntry : null;
+    const shortSignal = shortAllowed ? simpleMechanism.shortEntry : null;
+
+    let expectedAction: "enter_long" | "enter_short" | "hold" = "hold";
+    if (!openPositionAtEval && cooldownPass && cadenceHourPass && cadenceDayPass) {
+      if (longSignal === true) {
+        expectedAction = "enter_long";
+      } else if (shortSignal === true) {
+        expectedAction = "enter_short";
+      }
+    }
+
+    const actionTs = normalizeApiTs(row.ts);
+    const actualAction = closedTrades.some((t) => normalizeApiTs(t.entry_ts) === actionTs)
+      ? (closedTrades.find((t) => normalizeApiTs(t.entry_ts) === actionTs)?.trade_side === "short" ? "enter_short" : "enter_long")
+      : (openPositions.some((p) => normalizeApiTs(p.entry_ts) === actionTs)
+          ? (openPositions.find((p) => normalizeApiTs(p.entry_ts) === actionTs)?.trade_side === "short" ? "enter_short" : "enter_long")
+          : "hold");
+
+    return {
+      evalTs: evalRow.ts,
+      actionTs: row.ts,
+      hasOpenPosition: openPositionAtEval,
+      lastExitReason: lastExit?.exitReason ?? null,
+      barsSinceExit,
+      cooldownRequiredBars,
+      cooldownPass,
+      entriesLastHour,
+      entriesLastDay,
+      cadenceHourPass,
+      cadenceDayPass,
+      longAllowed,
+      shortAllowed,
+      longSignal,
+      shortSignal,
+      expectedAction,
+      actualAction,
+    };
+  }, [
+    timeframe,
+    evalRow,
+    row,
+    simpleMechanism,
+    tradeWindows,
+    openWindows,
+    timeframeSeconds,
+    cooldownBarsAfterExit,
+    cooldownBarsAfterStop,
+    maxEntriesPerHour,
+    maxEntriesPerDay,
+    tradeSide,
+    closedTrades,
+    openPositions,
+  ]);
+
+  const entryLongSimpleMetrics = useMemo<ThresholdSliderMetric[] | null>(() => {
+    if (!simpleMechanism || !entryDiagnostics) {
+      return null;
+    }
+    const longBbPass =
+      simpleMechanism.bbDeviation === null || simpleMechanism.entryDeviation === null
+        ? null
+        : simpleMechanism.bbDeviation <= -simpleMechanism.entryDeviation;
+    return [
+      {
+        key: "bb_dev",
+        label: "BB dev",
+        color: "#a78bfa",
+        value: simpleMechanism.bbDeviation,
+        threshold: -(simpleMechanism.entryDeviation ?? 0),
+        min: -2.2,
+        max: 2.2,
+        pass: longBbPass,
+        valueText: num(simpleMechanism.bbDeviation, 3),
+        thresholdText: num(-(simpleMechanism.entryDeviation ?? 0), 3),
+      },
+      {
+        key: "round",
+        label: "Rounding",
+        color: "#34d399",
+        value: simpleMechanism.longRounding === null ? null : simpleMechanism.longRounding ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: simpleMechanism.longRounding,
+        valueText: String(simpleMechanism.longRounding),
+        thresholdText: "true",
+      },
+      {
+        key: "flat_gate",
+        label: "Flat",
+        color: "#f97316",
+        value: entryDiagnostics.hasOpenPosition ? 0 : 1,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: !entryDiagnostics.hasOpenPosition,
+        valueText: entryDiagnostics.hasOpenPosition ? "position_open" : "flat",
+        thresholdText: "flat",
+      },
+      {
+        key: "cooldown_gate",
+        label: "Cooldown",
+        color: "#f59e0b",
+        value: entryDiagnostics.barsSinceExit,
+        threshold: entryDiagnostics.cooldownRequiredBars,
+        min: 0,
+        max: Math.max(entryDiagnostics.cooldownRequiredBars + 2, 10),
+        pass: entryDiagnostics.cooldownPass,
+        valueText: entryDiagnostics.barsSinceExit === null ? "n/a" : String(entryDiagnostics.barsSinceExit),
+        thresholdText: String(entryDiagnostics.cooldownRequiredBars),
+      },
+      {
+        key: "cadence_gate",
+        label: "Cadence",
+        color: "#60a5fa",
+        value: entryDiagnostics.cadenceHourPass && entryDiagnostics.cadenceDayPass ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.cadenceHourPass && entryDiagnostics.cadenceDayPass,
+        valueText: `H:${entryDiagnostics.entriesLastHour}/${maxEntriesPerHour} D:${entryDiagnostics.entriesLastDay}/${maxEntriesPerDay}`,
+        thresholdText: "under caps",
+      },
+      {
+        key: "expected",
+        label: "Expected",
+        color: "#22c55e",
+        value: entryDiagnostics.expectedAction === "enter_long" ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.expectedAction === "enter_long",
+        valueText: entryDiagnostics.expectedAction,
+        thresholdText: "enter_long",
+      },
+      {
+        key: "actual",
+        label: "Actual",
+        color: "#eab308",
+        value: entryDiagnostics.actualAction === "enter_long" ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.actualAction === "enter_long",
+        valueText: entryDiagnostics.actualAction,
+        thresholdText: "enter_long",
+      },
+    ];
+  }, [simpleMechanism, entryDiagnostics, maxEntriesPerHour, maxEntriesPerDay]);
+
+  const entryShortSimpleMetrics = useMemo<ThresholdSliderMetric[] | null>(() => {
+    if (!simpleMechanism || !entryDiagnostics) {
+      return null;
+    }
+    const shortBbPass =
+      simpleMechanism.bbDeviation === null || simpleMechanism.entryDeviation === null
+        ? null
+        : simpleMechanism.bbDeviation >= simpleMechanism.entryDeviation;
+    return [
+      {
+        key: "bb_dev",
+        label: "BB dev",
+        color: "#a78bfa",
+        value: simpleMechanism.bbDeviation,
+        threshold: simpleMechanism.entryDeviation ?? 0,
+        min: -2.2,
+        max: 2.2,
+        pass: shortBbPass,
+        valueText: num(simpleMechanism.bbDeviation, 3),
+        thresholdText: num(simpleMechanism.entryDeviation ?? 0, 3),
+      },
+      {
+        key: "round",
+        label: "Rounding",
+        color: "#34d399",
+        value: simpleMechanism.shortRounding === null ? null : simpleMechanism.shortRounding ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: simpleMechanism.shortRounding,
+        valueText: String(simpleMechanism.shortRounding),
+        thresholdText: "true",
+      },
+      {
+        key: "flat_gate",
+        label: "Flat",
+        color: "#f97316",
+        value: entryDiagnostics.hasOpenPosition ? 0 : 1,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: !entryDiagnostics.hasOpenPosition,
+        valueText: entryDiagnostics.hasOpenPosition ? "position_open" : "flat",
+        thresholdText: "flat",
+      },
+      {
+        key: "cooldown_gate",
+        label: "Cooldown",
+        color: "#f59e0b",
+        value: entryDiagnostics.barsSinceExit,
+        threshold: entryDiagnostics.cooldownRequiredBars,
+        min: 0,
+        max: Math.max(entryDiagnostics.cooldownRequiredBars + 2, 10),
+        pass: entryDiagnostics.cooldownPass,
+        valueText: entryDiagnostics.barsSinceExit === null ? "n/a" : String(entryDiagnostics.barsSinceExit),
+        thresholdText: String(entryDiagnostics.cooldownRequiredBars),
+      },
+      {
+        key: "cadence_gate",
+        label: "Cadence",
+        color: "#60a5fa",
+        value: entryDiagnostics.cadenceHourPass && entryDiagnostics.cadenceDayPass ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.cadenceHourPass && entryDiagnostics.cadenceDayPass,
+        valueText: `H:${entryDiagnostics.entriesLastHour}/${maxEntriesPerHour} D:${entryDiagnostics.entriesLastDay}/${maxEntriesPerDay}`,
+        thresholdText: "under caps",
+      },
+      {
+        key: "expected",
+        label: "Expected",
+        color: "#ef4444",
+        value: entryDiagnostics.expectedAction === "enter_short" ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.expectedAction === "enter_short",
+        valueText: entryDiagnostics.expectedAction,
+        thresholdText: "enter_short",
+      },
+      {
+        key: "actual",
+        label: "Actual",
+        color: "#eab308",
+        value: entryDiagnostics.actualAction === "enter_short" ? 1 : 0,
+        threshold: 1,
+        min: 0,
+        max: 1,
+        pass: entryDiagnostics.actualAction === "enter_short",
+        valueText: entryDiagnostics.actualAction,
+        thresholdText: "enter_short",
+      },
+    ];
+  }, [simpleMechanism, entryDiagnostics, maxEntriesPerHour, maxEntriesPerDay]);
+
+  const displayLongMetrics = entryLongSimpleMetrics ?? longMetrics;
+  const displayShortMetrics = entryShortSimpleMetrics ?? shortMetrics;
+
+  const entryMismatchReason = useMemo(() => {
+    if (!entryDiagnostics) {
+      return null;
+    }
+    if (entryDiagnostics.expectedAction === entryDiagnostics.actualAction) {
+      return "Expected and actual action match for selected bar.";
+    }
+    if (entryDiagnostics.hasOpenPosition) {
+      return "Blocked: position already open at evaluation bar (engine cannot open a second position).";
+    }
+    if (!entryDiagnostics.longAllowed && entryDiagnostics.expectedAction === "enter_long") {
+      return "Blocked: trade side mode does not allow long entries.";
+    }
+    if (!entryDiagnostics.shortAllowed && entryDiagnostics.expectedAction === "enter_short") {
+      return "Blocked: trade side mode does not allow short entries.";
+    }
+    if (!entryDiagnostics.cooldownPass) {
+      const lastExit = entryDiagnostics.lastExitReason ?? "recent exit";
+      return `Blocked: cooldown active after ${lastExit} (bars since exit ${entryDiagnostics.barsSinceExit ?? 0}/${entryDiagnostics.cooldownRequiredBars}).`;
+    }
+    if (!entryDiagnostics.cadenceHourPass || !entryDiagnostics.cadenceDayPass) {
+      return `Blocked: cadence cap reached (hour ${entryDiagnostics.entriesLastHour}/${maxEntriesPerHour}, day ${entryDiagnostics.entriesLastDay}/${maxEntriesPerDay}).`;
+    }
+    if (entryDiagnostics.longSignal === null && entryDiagnostics.shortSignal === null) {
+      return "Signal unavailable: selected evaluation bar is missing BB/EMA inputs (bb deviation or slope rounding cannot be computed).";
+    }
+    if (entryDiagnostics.expectedAction === "hold" && entryDiagnostics.actualAction === "hold") {
+      return "Gates passed, but no long/short entry signal fired on this bar, so engine correctly held.";
+    }
+    if (entryDiagnostics.expectedAction !== "hold" && entryDiagnostics.actualAction === "hold") {
+      return "Expected entry but engine held. Check execution constraints or adapter-level order rejection around this timestamp.";
+    }
+    return `Expected ${entryDiagnostics.expectedAction} but actual was ${entryDiagnostics.actualAction}.`;
+  }, [entryDiagnostics, maxEntriesPerHour, maxEntriesPerDay]);
 
   const sideAvailability =
     tradeSide === "long_short" ? "Long + Short" : tradeSide === "short_only" ? "Short only" : "Long only";
@@ -964,6 +1322,13 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
             Runtime evaluates previous closed bar: {evalRow?.ts ?? "n/a"}
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
+            <span>Engine symbol {assetControl?.symbol ?? "n/a"}</span>
+            <span>Engine timeframe {assetControl?.timeframe ?? timeframe}</span>
+            <span>Tuning version {assetControl?.tuning_version ?? 0}</span>
+            <span>Tuning source {assetControl?.tuning_source ?? "default"}</span>
+            <span>Diag status {evalRow?.engine_diag_status ?? "n/a"}</span>
+            <span>Diag EMA fast {evalRow?.engine_ema_fast ?? "n/a"}</span>
+            <span>Diag EMA slow {evalRow?.engine_ema_slow ?? "n/a"}</span>
             <span>Trade side mode {sideAvailability}</span>
             <span>EMA fast {num(emaFast)}</span>
             <span>BB mode {bbMode}</span>
@@ -977,13 +1342,27 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
           </div>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <ThresholdSliders title="Open Long (Signal + Gates)" metrics={longMetrics} sideEnabled={longEnabled} />
+              <ThresholdSliders title="Open Long (Engine Decision)" metrics={displayLongMetrics} sideEnabled={longEnabled} />
               <ThresholdSliders title="Close Long" metrics={closeLongMetrics} sideEnabled={longEnabled} />
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <ThresholdSliders title="Open Short (Signal + Gates)" metrics={shortMetrics} sideEnabled={shortEnabled} />
+              <ThresholdSliders title="Open Short (Engine Decision)" metrics={displayShortMetrics} sideEnabled={shortEnabled} />
               <ThresholdSliders title="Close Short" metrics={closeShortMetrics} sideEnabled={shortEnabled} />
             </div>
+            {entryMismatchReason ? (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: entryDiagnostics && entryDiagnostics.expectedAction !== entryDiagnostics.actualAction ? "#fca5a5" : "#9ca3af",
+                  background: "#0f1520",
+                  border: "1px solid #2b3442",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                }}
+              >
+                Mismatch Reason: {entryMismatchReason}
+              </div>
+            ) : null}
           </div>
         </div>
         {simpleMechanism ? (

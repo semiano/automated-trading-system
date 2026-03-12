@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
 
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -150,6 +150,66 @@ export async function updateAssetControl(args: {
   );
   if (!response.ok) throw new Error("Failed to update asset control");
   return (await response.json()) as AssetControl;
+}
+
+export async function updateAssetTuning(args: {
+  symbol: string;
+  timeframe: string;
+  bb_length?: number;
+  bb_stdev?: number;
+  atr_length?: number;
+  ema_fast?: number;
+  ema_slow?: number;
+  bb_entry_deviation?: number;
+  bb_exit_deviation?: number;
+  slope_lookback_bars?: number;
+  slope_flatten_factor?: number;
+  stop_atr?: number;
+  take_profit_atr?: number;
+  max_hold_bars?: number;
+  min_hold_bars?: number;
+  max_take_profit_pct?: number;
+  note?: string;
+  source?: string;
+  updated_by?: string;
+}): Promise<AssetControl> {
+  const response = await fetch(
+    `${BASE}/control-plane/asset-tuning/${encodeURIComponent(args.symbol)}?${qs({ timeframe: args.timeframe })}`,
+    withApiKey("write", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bb_length: args.bb_length,
+        bb_stdev: args.bb_stdev,
+        atr_length: args.atr_length,
+        ema_fast: args.ema_fast,
+        ema_slow: args.ema_slow,
+        bb_entry_deviation: args.bb_entry_deviation,
+        bb_exit_deviation: args.bb_exit_deviation,
+        slope_lookback_bars: args.slope_lookback_bars,
+        slope_flatten_factor: args.slope_flatten_factor,
+        stop_atr: args.stop_atr,
+        take_profit_atr: args.take_profit_atr,
+        max_hold_bars: args.max_hold_bars,
+        min_hold_bars: args.min_hold_bars,
+        max_take_profit_pct: args.max_take_profit_pct,
+        note: args.note,
+        source: args.source,
+        updated_by: args.updated_by,
+      }),
+    })
+  );
+  if (!response.ok) throw new Error("Failed to update asset tuning");
+  return (await response.json()) as AssetControl;
+}
+
+export async function fetchAssetTuningVersions(args: { symbol: string; timeframe: string; limit?: number }): Promise<AssetTuningVersion[]> {
+  const response = await fetch(
+    `${BASE}/control-plane/asset-tuning/${encodeURIComponent(args.symbol)}?${qs({ timeframe: args.timeframe, limit: args.limit ?? 25 })}`,
+    withApiKey("write")
+  );
+  if (!response.ok) throw new Error("Failed to fetch asset tuning versions");
+  return (await response.json()) as AssetTuningVersion[];
 }
 
 export async function fetchAssetLogs(args: { symbol: string; timeframe?: string; limit?: number }): Promise<AssetEngineLog[]> {
