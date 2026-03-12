@@ -1,0 +1,46 @@
+{
+  "1m": {
+    "timeframe": "1m",
+    "seed": 11,
+    "robust_score": 36.8633165462329,
+    "train_trades": 54,
+    "test_trades": 16,
+    "full_return": 0.022166491634669105,
+    "full_sharpe": 16.49622443544174,
+    "params": {
+      "rsi_length": 16,
+      "atr_length": 20,
+      "ema_fast": 7,
+      "ema_slow": 71,
+      "rsi_entry": 40.0,
+      "rsi_exit": 50,
+      "stop_atr": 1.1,
+      "take_profit_atr": 2.9,
+      "max_hold_bars": 250
+    },
+    "report_path": "artifacts\\hbar_retune_runs\\hbar_usd_1m_seed11_report.json",
+    "params_path": "artifacts\\hbar_retune_runs\\hbar_usd_1m_seed11_params.yaml"
+  },
+  "5m": {
+    "timeframe": "5m",
+    "seed": 11,
+    "robust_score": 39.706652614338765,
+    "train_trades": 9,
+    "test_trades": 5,
+    "full_return": 0.013332841291444852,
+    "full_sharpe": 12.210230230208698,
+    "params": {
+      "rsi_length": 23,
+      "atr_length": 14,
+      "ema_fast": 7,
+      "ema_slow": 142,
+      "rsi_entry": 42.0,
+      "rsi_exit": 62.0,
+      "stop_atr": 1.7,
+      "take_profit_atr": 3.4,
+      "max_hold_bars": 480
+    },
+    "report_path": "artifacts\\hbar_retune_runs\\hbar_usd_5m_seed11_report.json",
+    "params_path": "artifacts\\hbar_retune_runs\\hbar_usd_5m_seed11_params.yaml"
+  }
+}

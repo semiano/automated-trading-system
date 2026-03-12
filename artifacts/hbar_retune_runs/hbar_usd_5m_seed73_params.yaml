@@ -1,0 +1,45 @@
+generated_at_utc: '2026-03-12T02:18:59.737764+00:00'
+symbol: HBAR/USD
+venue: coinbase
+timeframe: 5m
+lookback_days: 30
+optimizer:
+  seed: 73
+  coarse_iterations: 400
+  refine_iterations: 320
+  objective: robust_score = 0.65*train_score + 0.35*test_score + 10*min(train_win_rate,test_win_rate)
+cost_model:
+  fee_bps: 0.0
+  slippage_bps: 0.0
+xrp_strategy_params:
+  rsi_length: 13
+  atr_length: 22
+  ema_fast: 7
+  ema_slow: 102
+  rsi_entry: 39.0
+  rsi_exit: 69.0
+  stop_atr: 2.1
+  take_profit_atr: 2.6
+  max_hold_bars: 100
+performance:
+  train:
+    score: 38.20198393352359
+    total_return: 0.00872401401867684
+    max_drawdown: -0.0010560777273207478
+    sharpe: 18.741473597647577
+    trades: 3
+    win_rate: 0.6666666666666666
+  test:
+    score: -29.516022790078782
+    total_return: -0.0037395040209582397
+    max_drawdown: -0.0037395040209582397
+    sharpe: -14.428851073362733
+    trades: 2
+    win_rate: 0.0
+  full:
+    score: 13.703010468186374
+    total_return: 0.0049518865122168965
+    max_drawdown: -0.0037395040209582397
+    sharpe: 6.79109602911109
+    trades: 5
+    win_rate: 0.4

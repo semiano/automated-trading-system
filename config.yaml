@@ -209,6 +209,21 @@ trading_1m:
       max_hold_bars: 60
       min_hold_bars: 8
       max_take_profit_pct: 0.0030
+    HBAR/USD:
+      bb_length: 20
+      bb_stdev: 2.0
+      atr_length: 20
+      ema_fast: 7
+      ema_slow: 71
+      bb_entry_deviation: 1.05
+      bb_exit_deviation: 0.15
+      slope_lookback_bars: 3
+      slope_flatten_factor: 0.82
+      stop_atr: 1.1
+      take_profit_atr: 2.9
+      max_hold_bars: 250
+      min_hold_bars: 8
+      max_take_profit_pct: 0.0030
 
 trading_5m:
   enabled: true
@@ -262,31 +277,46 @@ trading_5m:
   default_params:
     bb_length: 20
     bb_stdev: 2.0
-    atr_length: 14
-    ema_fast: 20
-    ema_slow: 50
-    bb_entry_deviation: 1.05
-    bb_exit_deviation: 0.15
+    atr_length: 10
+    ema_fast: 12
+    ema_slow: 55
+    bb_entry_deviation: 0.9
+    bb_exit_deviation: 0.2
     slope_lookback_bars: 3
-    slope_flatten_factor: 0.82
-    stop_atr: 1.4
-    take_profit_atr: 2.2
-    max_hold_bars: 60
+    slope_flatten_factor: 0.9
+    stop_atr: 1.6
+    take_profit_atr: 1.8
+    max_hold_bars: 50
     min_hold_bars: 5
     max_take_profit_pct: 0.0065
   per_asset_params:
     XRP/USD:
       bb_length: 20
       bb_stdev: 2.0
-      atr_length: 14
-      ema_fast: 20
-      ema_slow: 50
-      bb_entry_deviation: 1.05
-      bb_exit_deviation: 0.15
+      atr_length: 10
+      ema_fast: 12
+      ema_slow: 55
+      bb_entry_deviation: 0.9
+      bb_exit_deviation: 0.2
       slope_lookback_bars: 3
-      slope_flatten_factor: 0.82
-      stop_atr: 1.4
-      take_profit_atr: 2.2
-      max_hold_bars: 60
+      slope_flatten_factor: 0.9
+      stop_atr: 1.6
+      take_profit_atr: 1.8
+      max_hold_bars: 50
+      min_hold_bars: 5
+      max_take_profit_pct: 0.0065
+    HBAR/USD:
+      bb_length: 20
+      bb_stdev: 2.0
+      atr_length: 14
+      ema_fast: 7
+      ema_slow: 142
+      bb_entry_deviation: 0.9
+      bb_exit_deviation: 0.2
+      slope_lookback_bars: 3
+      slope_flatten_factor: 0.9
+      stop_atr: 1.7
+      take_profit_atr: 3.4
+      max_hold_bars: 480
       min_hold_bars: 5
       max_take_profit_pct: 0.0065
