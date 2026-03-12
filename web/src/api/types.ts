@@ -175,6 +175,25 @@ export type RiskPolicySettings = {
   portfolio_soft_risk_limit_usd: number;
 };
 
+export type PortfolioBalanceAsset = {
+  asset: string;
+  free: number;
+  usd_price?: number | null;
+  value_usd: number;
+};
+
+export type PortfolioBalancesSnapshot = {
+  mode: "sim" | "live";
+  as_of: string;
+  total_value_usd: number;
+  cash_value_usd: number;
+  asset_value_usd: number;
+  cash_ratio: number;
+  asset_ratio: number;
+  note?: string | null;
+  assets: PortfolioBalanceAsset[];
+};
+
 export type CatchupStatusRow = {
   symbol: string;
   timeframe: string;

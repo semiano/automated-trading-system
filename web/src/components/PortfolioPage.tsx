@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAssetLogs, fetchCandles, fetchIndicators } from "../api/client";
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, OpenPosition, RiskPolicySettings } from "../api/types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot } from "../api/types";
 import { num } from "../utils/formatting";
 
 type Props = {
@@ -8,7 +8,7 @@ type Props = {
   closedTrades: ClosedTrade[];
   totalNetPnl: number;
   assetControls: AssetControl[];
-  riskPolicy: RiskPolicySettings;
+  portfolioBalances: PortfolioBalancesSnapshot | null;
   pnlMode: "sim" | "live";
   onPnlMode: (mode: "sim" | "live") => void;
   onSaveAssetControl: (payload: {
@@ -46,10 +46,6 @@ type Props = {
     target_base_ratio?: number;
     tolerance_bps?: number;
   }) => Promise<void>;
-  onSaveRiskPolicy: (payload: {
-    risk_budget_policy?: "per_symbol" | "portfolio";
-    portfolio_soft_risk_limit_usd?: number;
-  }) => Promise<void>;
 };
 
 function timeframeColor(tf: string): string {
@@ -86,9 +82,8 @@ function usd(value: number): string {
   return value.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, riskPolicy, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset, onSaveRiskPolicy }: Props) {
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, portfolioBalances, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
-  const [draftPortfolioLimit, setDraftPortfolioLimit] = useState<string>(String(riskPolicy.portfolio_soft_risk_limit_usd));
   const [saving, setSaving] = useState(false);
   const [logSymbol, setLogSymbol] = useState<string | null>(null);
   const [logRows, setLogRows] = useState<AssetEngineLog[]>([]);
@@ -125,10 +120,6 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     }
     setDraftLimits(next);
   }, [assetControls]);
-
-  useEffect(() => {
-    setDraftPortfolioLimit(String(riskPolicy.portfolio_soft_risk_limit_usd));
-  }, [riskPolicy.portfolio_soft_risk_limit_usd]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -474,6 +465,71 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     ? hoveredIndex
     : null;
   const hoverDot = activeHoverIndex !== null && chartStats ? chartStats.dots[activeHoverIndex] : null;
+  const balancesMode = portfolioBalances?.mode ?? pnlMode;
+  const isSimBalances = balancesMode === "sim";
+  const freeLabel = isSimBalances ? "Available (USD)" : "Free Qty";
+  const freeTitle = isSimBalances
+    ? "SIM: remaining budget available for that symbol after subtracting current open risk usage."
+    : "LIVE: free exchange quantity for this asset/currency.";
+  const pxLabel = isSimBalances ? "Unit (USD)" : "USD Price";
+  const pxTitle = isSimBalances
+    ? "SIM: fixed to 1.0 because values are already represented in USD budget units."
+    : "LIVE: inferred USD conversion price used for valuation.";
+  const valueLabel = isSimBalances ? "Budget (USD)" : "Value (USD)";
+  const valueTitle = isSimBalances
+    ? "SIM: total configured budget represented by this row (used + available)."
+    : "LIVE: USD-marked value of free quantity for this asset/currency.";
+
+  const fundingRows = useMemo(() => {
+    const controlsForMode = assetControls.filter((row) => row.execution_mode === balancesMode);
+    const requiredBySymbol = new Map<string, number>();
+    for (const row of controlsForMode) {
+      requiredBySymbol.set(row.symbol, (requiredBySymbol.get(row.symbol) ?? 0) + Number(row.soft_risk_limit_usd || 0));
+    }
+
+    const actualBySymbol = new Map<string, number>();
+
+    if (isSimBalances) {
+      for (const row of portfolioBalances?.assets ?? []) {
+        actualBySymbol.set(row.asset, Number(row.free || 0));
+      }
+    } else {
+      for (const row of controlsForMode) {
+        const live = row.live_balance;
+        if (!live) continue;
+        const baseFree = Number(live.base_free ?? 0);
+        const quoteFree = Number(live.quote_free ?? 0);
+        const px = Number(live.price ?? 0);
+        const actual = (Number.isFinite(baseFree) ? baseFree : 0) * (Number.isFinite(px) ? px : 0) + (Number.isFinite(quoteFree) ? quoteFree : 0);
+        if (!Number.isFinite(actual)) continue;
+        actualBySymbol.set(row.symbol, Math.max(actualBySymbol.get(row.symbol) ?? 0, actual));
+      }
+    }
+
+    const symbols = Array.from(new Set([...requiredBySymbol.keys(), ...actualBySymbol.keys()])).sort();
+    return symbols.map((symbol) => {
+      const required = requiredBySymbol.get(symbol) ?? 0;
+      const actual = actualBySymbol.get(symbol) ?? 0;
+      const gap = actual - required;
+      const ratio = required > 0 ? actual / required : null;
+      let status: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target" = "no_target";
+      if (required > 0) {
+        if (ratio !== null && ratio < 0.5) status = "critical";
+        else if (ratio !== null && ratio < 0.9) status = "needs_alignment";
+        else if (ratio !== null && ratio > 1.5) status = "surplus";
+        else status = "aligned";
+      }
+      return { symbol, required, actual, gap, ratio, status };
+    });
+  }, [assetControls, balancesMode, isSimBalances, portfolioBalances]);
+
+  const fundingBadge = (status: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target") => {
+    if (status === "aligned") return { text: "Aligned", bg: "#1f4d32", fg: "#d1fae5" };
+    if (status === "needs_alignment") return { text: "Needs Align", bg: "#5a4316", fg: "#fde68a" };
+    if (status === "critical") return { text: "Critical", bg: "#5b1f1f", fg: "#fecaca" };
+    if (status === "surplus") return { text: "Surplus", bg: "#1e3a5f", fg: "#bfdbfe" };
+    return { text: "No Target", bg: "#374151", fg: "#e5e7eb" };
+  };
 
   return (
     <div style={{ padding: 12, display: "grid", gap: 14 }}>
@@ -484,94 +540,104 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
       </div>
 
       <section style={{ border: "1px solid #22262f", borderRadius: 6 }}>
-        <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600 }}>Portfolio Risk Policy</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: 10, fontSize: 12 }}>
-          <span>Policy</span>
-          <div style={{ display: "inline-flex", border: "1px solid #2d3340", borderRadius: 6, overflow: "hidden" }}>
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Portfolio Balances</span>
+          <div style={{ display: "inline-flex", gap: 8 }}>
             <button
               type="button"
-              disabled={saving}
-              onClick={async () => {
-                setSaving(true);
-                try {
-                  await onSaveRiskPolicy({ risk_budget_policy: "per_symbol" });
-                } finally {
-                  setSaving(false);
-                }
-              }}
-              style={{
-                padding: "3px 8px",
-                border: "none",
-                borderRight: "1px solid #2d3340",
-                background: riskPolicy.risk_budget_policy === "per_symbol" ? "#2d3340" : "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
+              onClick={() => onPnlMode("sim")}
+              style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: pnlMode === "sim" ? "#2d3340" : "transparent", color: "inherit", cursor: "pointer" }}
             >
-              Per Symbol
+              Sim
             </button>
             <button
               type="button"
-              disabled={saving}
-              onClick={async () => {
-                setSaving(true);
-                try {
-                  await onSaveRiskPolicy({ risk_budget_policy: "portfolio" });
-                } finally {
-                  setSaving(false);
-                }
-              }}
-              style={{
-                padding: "3px 8px",
-                border: "none",
-                background: riskPolicy.risk_budget_policy === "portfolio" ? "#2d3340" : "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
+              onClick={() => onPnlMode("live")}
+              style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: pnlMode === "live" ? "#2d3340" : "transparent", color: "inherit", cursor: "pointer" }}
             >
-              Portfolio
+              Real
             </button>
           </div>
-
-          <span>Portfolio Soft Limit</span>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={draftPortfolioLimit}
-            onChange={(e) => setDraftPortfolioLimit(e.target.value)}
-            style={{ width: 110, padding: "3px 6px", background: "#0f131c", color: "inherit", border: "1px solid #2d3340", borderRadius: 4 }}
-          />
-          <button
-            type="button"
-            disabled={saving}
-            onClick={async () => {
-              const parsed = Number(draftPortfolioLimit);
-              if (!Number.isFinite(parsed) || parsed < 0) return;
-              setSaving(true);
-              try {
-                await onSaveRiskPolicy({ portfolio_soft_risk_limit_usd: parsed });
-              } finally {
-                setSaving(false);
-              }
-            }}
-            style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #2d3340", background: "#2d3340", color: "inherit", cursor: "pointer" }}
-          >
-            Set
-          </button>
-          <span style={{ color: "#9ca3af" }}>0 disables global cap</span>
+        </div>
+        <div style={{ padding: 10, fontSize: 12, display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <span title="Sum of all rows in this mode.">
+              Total: <strong>{portfolioBalances ? usd(portfolioBalances.total_value_usd) : "-"}</strong>
+            </span>
+            <span title={isSimBalances ? "SIM available budget pool across symbols." : "LIVE value held in USD-like quote currencies (USD/USDT/USDC/etc.)."}>
+              Cash: <strong>{portfolioBalances ? usd(portfolioBalances.cash_value_usd) : "-"}</strong>
+            </span>
+            <span title={isSimBalances ? "SIM budget currently allocated to open risk." : "LIVE value held in non-cash assets (e.g. BTC, ETH)."}>
+              Asset: <strong>{portfolioBalances ? usd(portfolioBalances.asset_value_usd) : "-"}</strong>
+            </span>
+            <span title="Cash / Total.">
+              Cash Ratio: <strong>{portfolioBalances ? `${num(portfolioBalances.cash_ratio * 100, 2)}%` : "-"}</strong>
+            </span>
+            <span title="Asset / Total.">
+              Asset Ratio: <strong>{portfolioBalances ? `${num(portfolioBalances.asset_ratio * 100, 2)}%` : "-"}</strong>
+            </span>
+          </div>
+          {portfolioBalances?.note ? <div style={{ color: "#9ca3af" }}>{portfolioBalances.note}</div> : null}
+          <div style={{ color: "#9ca3af" }}>
+            {isSimBalances
+              ? "SIM mode: balances are budget-based, not exchange wallet balances."
+              : "LIVE mode: balances are exchange free balances valued in USD."}
+          </div>
+          <div style={{ color: "#9ca3af" }}>
+            As Of: {portfolioBalances?.as_of ? new Date(portfolioBalances.as_of).toLocaleString() : "-"}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: 8 }}>Asset</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Theoretical required capital from control-plane soft risk limits.">Required (USD)</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title={isSimBalances ? "SIM: currently available budget after open-risk usage." : "LIVE: wallet value for this symbol, using base_qty*price + quote_qty."}>Actual (USD)</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Actual minus Required. Negative means underfunded.">Gap (USD)</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Actual/Required ratio.">Coverage</th>
+                  <th style={{ textAlign: "left", padding: 8 }} title="Color-coded alignment indicator for balancing or funding action.">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fundingRows.length === 0 ? (
+                  <tr>
+                    <td style={{ padding: 8 }} colSpan={6}>No balance rows.</td>
+                  </tr>
+                ) : (
+                  fundingRows.map((row) => {
+                    const badge = fundingBadge(row.status);
+                    return (
+                    <tr key={row.symbol} style={{ borderTop: "1px solid #1b1f29" }}>
+                      <td style={{ padding: 8 }}>{row.symbol}</td>
+                      <td style={{ textAlign: "right", padding: 8 }}>{num(row.required, 2)}</td>
+                      <td style={{ textAlign: "right", padding: 8 }}>{num(row.actual, 2)}</td>
+                      <td style={{ textAlign: "right", padding: 8, color: row.gap < 0 ? "#fca5a5" : "#86efac" }}>{num(row.gap, 2)}</td>
+                      <td style={{ textAlign: "right", padding: 8 }}>{row.ratio == null ? "-" : `${num(row.ratio * 100, 1)}%`}</td>
+                      <td style={{ padding: 8 }}>
+                        <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: badge.bg, color: badge.fg, fontWeight: 600 }}>
+                          {badge.text}
+                        </span>
+                      </td>
+                    </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ color: "#9ca3af" }}>
+            {isSimBalances
+              ? "SIM Actual uses currently available budget (after open trades). Required uses control-plane soft risk limits."
+              : "LIVE Actual uses free wallet value inferred per symbol from base/quote balances and market price. Required uses control-plane soft risk limits."}
+          </div>
+          <div style={{ color: "#9ca3af" }}>
+            Raw fields: {freeLabel}, {pxLabel}, {valueLabel}.
+          </div>
         </div>
       </section>
 
       <section style={{ border: "1px solid #22262f", borderRadius: 6 }}>
         <div style={{ padding: "8px 10px", borderBottom: "1px solid #22262f", fontWeight: 600 }}>Control Plane</div>
-        <div style={{ padding: "8px 10px", borderBottom: "1px solid #1b1f29", fontSize: 12, color: "#c7ced8" }}>
-          Active Global Policy: <strong>{riskPolicy.risk_budget_policy === "portfolio" ? "Portfolio" : "Per Symbol"}</strong>
-          <span style={{ marginLeft: 10 }}>
-            Global Soft Limit: <strong>{num(riskPolicy.portfolio_soft_risk_limit_usd, 2)}</strong>
-          </span>
-          {riskPolicy.portfolio_soft_risk_limit_usd <= 0 ? <span style={{ marginLeft: 10, color: "#9ca3af" }}>(disabled)</span> : null}
-        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>

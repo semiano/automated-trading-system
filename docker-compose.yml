@@ -119,6 +119,26 @@ services:
     mem_limit: ${TRADER_5M_MEM_LIMIT:-256m}
     mem_reservation: ${TRADER_5M_MEM_RESERVATION:-128m}
 
+  trader_1h:
+    build:
+      context: .
+      dockerfile: docker/trader.Dockerfile
+    command: ["python", "-m", "services.trader_1h_main"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MDTAS_CONFIG_PATH: /app/config.yaml
+      MDTAS_LOG_LEVEL: ${MDTAS_LOG_LEVEL:-INFO}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${MDTAS_CONFIG_FILE:-./config.yaml}:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    mem_limit: ${TRADER_1H_MEM_LIMIT:-256m}
+    mem_reservation: ${TRADER_1H_MEM_RESERVATION:-128m}
+
   web:
     build:
       context: .

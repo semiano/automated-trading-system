@@ -864,6 +864,160 @@ class TradingRuntime:
                 )
                 return
 
+            planned_entry_notional = float(raw_entry_price) * float(qty)
+            current_symbol_risk = self.trading_repo.current_open_risk_usd(
+                symbol=symbol,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            available_actual_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            if execution_mode == "sim" and planned_entry_notional > available_actual_usd:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="actual_balance_blocked",
+                    note=(
+                        f"required_notional={planned_entry_notional:.4f} > available_actual={available_actual_usd:.4f}; "
+                        f"symbol_limit={float(control.soft_risk_limit_usd):.4f}, current_open_risk={float(current_symbol_risk):.4f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["actual_balance_blocked"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=sizing_result.qty_final,
+                    notional=planned_entry_notional,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            max_position_notional = self.cfg.trading.max_position_notional_usd
+            if max_position_notional is not None and max_position_notional > 0 and planned_entry_notional > max_position_notional:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="max_notional_blocked",
+                    note=(
+                        f"notional={planned_entry_notional:.4f} > max_position_notional={max_position_notional:.4f}; "
+                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={qty:.8f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["max_notional_blocked"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=qty,
+                    notional=planned_entry_notional,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            if constraints.min_notional_usd > 0 and planned_entry_notional < constraints.min_notional_usd:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="min_notional_blocked",
+                    note=(
+                        f"notional={planned_entry_notional:.4f} < min_notional={constraints.min_notional_usd:.4f}; "
+                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={qty:.8f}"
+                    ),
+                    log_event=True,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["min_notional_blocked"],
+                    sizing_mode=self.cfg.trading.sizing_mode,
+                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
+                    stop_distance=sizing_result.stop_distance,
+                    qty_raw=sizing_result.qty_raw,
+                    qty_final=qty,
+                    notional=planned_entry_notional,
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
+            atr = float(prev["atr"])
+            raw_tp_distance = params.take_profit_atr * atr
+            cap_distance = (params.max_take_profit_pct * float(raw_entry_price)) if params.max_take_profit_pct > 0 else raw_tp_distance
+            tp_distance = min(raw_tp_distance, cap_distance)
+            if chosen_side == "short":
+                planned_stop_price = float(raw_entry_price) + (params.stop_atr * atr)
+                projected_trade_risk = max(planned_stop_price - float(raw_entry_price), 0.0) * float(qty)
+            else:
+                planned_stop_price = float(raw_entry_price) - (params.stop_atr * atr)
+                projected_trade_risk = max(float(raw_entry_price) - planned_stop_price, 0.0) * float(qty)
+            projected_trade_risk += planned_entry_notional * (float(constraints.fee_bps) / 10000.0)
+
+            current_risk, risk_limit = self._current_risk_and_limit(
+                symbol=symbol,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+                per_symbol_limit=float(control.soft_risk_limit_usd),
+            )
+            if risk_limit > 0 and current_risk + projected_trade_risk > risk_limit:
+                self.trading_repo.set_asset_state(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
+                    state="risk_blocked",
+                    note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={risk_limit:.4f}",
+                    log_event=True,
+                )
+                logger.warning(
+                    "Soft risk limit blocked entry for %s: current_risk=%.4f projected_trade_risk=%.4f soft_limit=%.4f",
+                    symbol,
+                    current_risk,
+                    projected_trade_risk,
+                    risk_limit,
+                )
+                self._emit_decision_log(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    ts=decision_ts,
+                    decision="hold",
+                    reasons=["risk_blocked"],
+                    htf_timeframe=htf_timeframe,
+                    trend_state=regime.get("trend_state"),
+                    chop_state=regime.get("chop_state"),
+                    bb_width_norm=regime.get("bb_width_norm"),
+                    atr_pct=regime.get("atr_pct"),
+                )
+                return
+
             try:
                 entry_fill = self.execution.submit_entry(
                     symbol=symbol,
@@ -903,71 +1057,6 @@ class TradingRuntime:
                 return
 
             entry_notional = float(entry_fill.price) * float(entry_fill.qty)
-            max_position_notional = self.cfg.trading.max_position_notional_usd
-            if max_position_notional is not None and max_position_notional > 0 and entry_notional > max_position_notional:
-                self.trading_repo.set_asset_state(
-                    symbol=symbol,
-            timeframe=timeframe,
-            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="max_notional_blocked",
-                    note=(
-                        f"notional={entry_notional:.4f} > max_position_notional={max_position_notional:.4f}; "
-                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={entry_fill.qty:.8f}"
-                    ),
-                    log_event=True,
-                )
-                self._emit_decision_log(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    ts=decision_ts,
-                    decision="hold",
-                    reasons=["max_notional_blocked"],
-                    sizing_mode=self.cfg.trading.sizing_mode,
-                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
-                    stop_distance=sizing_result.stop_distance,
-                    qty_raw=sizing_result.qty_raw,
-                    qty_final=float(entry_fill.qty),
-                    notional=entry_notional,
-                    htf_timeframe=htf_timeframe,
-                    trend_state=regime.get("trend_state"),
-                    chop_state=regime.get("chop_state"),
-                    bb_width_norm=regime.get("bb_width_norm"),
-                    atr_pct=regime.get("atr_pct"),
-                )
-                return
-
-            if constraints.min_notional_usd > 0 and entry_notional < constraints.min_notional_usd:
-                self.trading_repo.set_asset_state(
-                    symbol=symbol,
-            timeframe=timeframe,
-            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="min_notional_blocked",
-                    note=(
-                        f"notional={entry_notional:.4f} < min_notional={constraints.min_notional_usd:.4f}; "
-                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={entry_fill.qty:.8f}"
-                    ),
-                    log_event=True,
-                )
-                self._emit_decision_log(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    ts=decision_ts,
-                    decision="hold",
-                    reasons=["min_notional_blocked"],
-                    sizing_mode=self.cfg.trading.sizing_mode,
-                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
-                    stop_distance=sizing_result.stop_distance,
-                    qty_raw=sizing_result.qty_raw,
-                    qty_final=float(entry_fill.qty),
-                    notional=entry_notional,
-                    htf_timeframe=htf_timeframe,
-                    trend_state=regime.get("trend_state"),
-                    chop_state=regime.get("chop_state"),
-                    bb_width_norm=regime.get("bb_width_norm"),
-                    atr_pct=regime.get("atr_pct"),
-                )
-                return
-
             atr = float(prev["atr"])
             raw_tp_distance = params.take_profit_atr * atr
             cap_distance = (params.max_take_profit_pct * float(entry_fill.price)) if params.max_take_profit_pct > 0 else raw_tp_distance
@@ -975,48 +1064,9 @@ class TradingRuntime:
             if chosen_side == "short":
                 stop_price = entry_fill.price + (params.stop_atr * atr)
                 take_profit_price = entry_fill.price - tp_distance
-                projected_trade_risk = max(stop_price - entry_fill.price, 0.0) * entry_fill.qty + entry_fill.fee_usd
             else:
                 stop_price = entry_fill.price - (params.stop_atr * atr)
                 take_profit_price = entry_fill.price + tp_distance
-                projected_trade_risk = max(entry_fill.price - stop_price, 0.0) * entry_fill.qty + entry_fill.fee_usd
-
-            current_risk, risk_limit = self._current_risk_and_limit(
-                symbol=symbol,
-                venue=venue,
-                timeframe=timeframe,
-                execution_mode=execution_mode,
-                per_symbol_limit=float(control.soft_risk_limit_usd),
-            )
-            if risk_limit > 0 and current_risk + projected_trade_risk > risk_limit:
-                self.trading_repo.set_asset_state(
-                    symbol=symbol,
-            timeframe=timeframe,
-            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="risk_blocked",
-                    note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={risk_limit:.4f}",
-                    log_event=True,
-                )
-                logger.warning(
-                    "Soft risk limit blocked entry for %s: current_risk=%.4f projected_trade_risk=%.4f soft_limit=%.4f",
-                    symbol,
-                    current_risk,
-                    projected_trade_risk,
-                    risk_limit,
-                )
-                self._emit_decision_log(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    ts=decision_ts,
-                    decision="hold",
-                    reasons=["risk_blocked"],
-                    htf_timeframe=htf_timeframe,
-                    trend_state=regime.get("trend_state"),
-                    chop_state=regime.get("chop_state"),
-                    bb_width_norm=regime.get("bb_width_norm"),
-                    atr_pct=regime.get("atr_pct"),
-                )
-                return
 
             self.trading_repo.open_position(
                 symbol=symbol,

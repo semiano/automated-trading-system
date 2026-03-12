@@ -220,3 +220,22 @@ class CatchupStatusOut(BaseModel):
     unresolved_gap_bars_estimate: int
     last_gap_scan_ts: datetime | None
     is_caught_up: bool
+
+
+class PortfolioBalanceAssetOut(BaseModel):
+    asset: str
+    free: float
+    usd_price: float | None = None
+    value_usd: float
+
+
+class PortfolioBalancesOut(BaseModel):
+    mode: str
+    as_of: datetime
+    total_value_usd: float
+    cash_value_usd: float
+    asset_value_usd: float
+    cash_ratio: float
+    asset_ratio: float
+    note: str | None = None
+    assets: list[PortfolioBalanceAssetOut]

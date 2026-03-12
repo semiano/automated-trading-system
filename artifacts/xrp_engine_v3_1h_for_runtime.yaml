@@ -3,8 +3,8 @@ symbol: XRP/USD
 venue: coinbase
 timeframe: 1h
 selection_basis: timeboxed_15m_robust_score
-source_summary: artifacts\xrp_engine_v3_1h_timeboxed_report.json
-xrp_engine_v3_1h_params:
+source_summary: artifacts\xrp_engine_v3_1h_best_params.yaml
+xrp_engine_v3_5m_params:
   bb_length: 26
   bb_stdev: 1.8
   atr_length: 16

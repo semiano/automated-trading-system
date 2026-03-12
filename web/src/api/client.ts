@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot, RiskPolicySettings } from "./types";
 
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -277,4 +277,13 @@ export async function valueBalanceAsset(args: {
     throw new Error(`Failed to value-balance asset: ${detail}`);
   }
   return (await response.json()) as AssetValueBalanceResponse;
+}
+
+export async function fetchPortfolioBalances(args: { mode: "sim" | "live" }): Promise<PortfolioBalancesSnapshot> {
+  const response = await fetch(`${BASE}/control-plane/portfolio/balances?${qs(args)}`, withApiKey("write"));
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to fetch portfolio balances: ${detail}`);
+  }
+  return (await response.json()) as PortfolioBalancesSnapshot;
 }

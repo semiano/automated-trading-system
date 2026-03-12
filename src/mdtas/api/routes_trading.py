@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,8 @@ from mdtas.api.schemas import (
     AssetEngineLogOut,
     AssetControlOut,
     AssetControlUpdate,
+    PortfolioBalanceAssetOut,
+    PortfolioBalancesOut,
     AssetTuningUpdate,
     AssetTuningVersionOut,
     ClosedTradeOut,
@@ -95,6 +99,33 @@ def _price_from_ticker(ticker: dict) -> float:
             if price > 0:
                 return price
     raise HTTPException(status_code=503, detail="No usable market price in ticker")
+
+
+_USD_EQUIV_QUOTES = {"USD", "USDT", "USDC", "BUSD", "DAI", "FDUSD", "USDP"}
+
+
+def _usd_price_for_currency(*, adapter: CcxtExecutionAdapter, currency: str) -> float | None:
+    ccy = currency.upper()
+    if ccy in _USD_EQUIV_QUOTES:
+        return 1.0
+
+    for market in (f"{ccy}/USDT", f"{ccy}/USD"):
+        try:
+            ticker = adapter.exchange.fetch_ticker(market)
+            return _price_from_ticker(ticker)
+        except Exception:  # noqa: BLE001
+            continue
+
+    for market in (f"USDT/{ccy}", f"USD/{ccy}"):
+        try:
+            ticker = adapter.exchange.fetch_ticker(market)
+            px = _price_from_ticker(ticker)
+            if px > 0:
+                return 1.0 / px
+        except Exception:  # noqa: BLE001
+            continue
+
+    return None
 
 
 def _build_live_adapter(cfg, runtime_cfg) -> CcxtExecutionAdapter:
@@ -463,6 +494,164 @@ def list_asset_controls(
             )
         )
     return out
+
+
+@router.get("/control-plane/portfolio/balances", response_model=PortfolioBalancesOut)
+def get_portfolio_balances(
+    mode: str = Query(default="sim"),
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
+    execution_mode = _validate_mode(mode)
+    if execution_mode is None:
+        execution_mode = "sim"
+
+    cfg = get_config()
+    now = datetime.now(timezone.utc)
+
+    if execution_mode == "live":
+        timeframes = _control_plane_timeframes(cfg)
+        live_runtime = next((_runtime_config_for_timeframe(cfg, tf) for tf in timeframes if _runtime_config_for_timeframe(cfg, tf).execution_adapter == "real"), None)
+        if live_runtime is None:
+            return PortfolioBalancesOut(
+                mode="live",
+                as_of=now,
+                total_value_usd=0.0,
+                cash_value_usd=0.0,
+                asset_value_usd=0.0,
+                cash_ratio=0.0,
+                asset_ratio=0.0,
+                note="No live runtime configured yet. Set one or more assets to live mode and configure exchange credentials.",
+                assets=[],
+            )
+
+        try:
+            adapter = _build_live_adapter(cfg, live_runtime)
+            balance = adapter.exchange.fetch_balance()
+        except Exception as exc:  # noqa: BLE001
+            return PortfolioBalancesOut(
+                mode="live",
+                as_of=now,
+                total_value_usd=0.0,
+                cash_value_usd=0.0,
+                asset_value_usd=0.0,
+                cash_ratio=0.0,
+                asset_ratio=0.0,
+                note=f"Live balance unavailable: {exc}",
+                assets=[],
+            )
+
+        currencies: set[str] = set()
+        for symbol in cfg.symbols:
+            base_ccy, quote_ccy = _split_symbol(symbol)
+            currencies.add(base_ccy)
+            currencies.add(quote_ccy)
+
+        rows: list[PortfolioBalanceAssetOut] = []
+        cash_value = 0.0
+        asset_value = 0.0
+
+        valuation_warnings: list[str] = []
+        for ccy in sorted(currencies):
+            free_qty = float((balance.get(ccy) or {}).get("free") or 0.0)
+            if free_qty <= 0:
+                continue
+            usd_px = None
+            try:
+                usd_px = _usd_price_for_currency(adapter=adapter, currency=ccy)
+            except Exception as exc:  # noqa: BLE001
+                valuation_warnings.append(f"{ccy}:{exc}")
+            value_usd = float(free_qty * usd_px) if usd_px is not None else 0.0
+            if ccy in _USD_EQUIV_QUOTES:
+                cash_value += value_usd
+            else:
+                asset_value += value_usd
+            rows.append(
+                PortfolioBalanceAssetOut(
+                    asset=ccy,
+                    free=float(free_qty),
+                    usd_price=float(usd_px) if usd_px is not None else None,
+                    value_usd=float(value_usd),
+                )
+            )
+
+        total_value = cash_value + asset_value
+        cash_ratio = (cash_value / total_value) if total_value > 0 else 0.0
+        asset_ratio = (asset_value / total_value) if total_value > 0 else 0.0
+        return PortfolioBalancesOut(
+            mode="live",
+            as_of=now,
+            total_value_usd=float(total_value),
+            cash_value_usd=float(cash_value),
+            asset_value_usd=float(asset_value),
+            cash_ratio=float(cash_ratio),
+            asset_ratio=float(asset_ratio),
+            note=(
+                "Exchange free balances valued in USD; unsupported currency pairs are valued at 0."
+                if not valuation_warnings
+                else "Exchange balances loaded with partial valuation errors; some assets may be valued at 0."
+            ),
+            assets=rows,
+        )
+
+    controls = repo.list_asset_controls(
+        symbols=cfg.symbols,
+        timeframes=_control_plane_timeframes(cfg),
+        default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+        default_execution_mode="sim",
+        default_trade_side="long_only",
+    )
+
+    per_symbol_budget: dict[str, float] = {}
+    per_symbol_allocated: dict[str, float] = {}
+    venue = cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock"
+
+    for row in controls:
+        if row.execution_mode != "sim":
+            continue
+        symbol_budget = per_symbol_budget.get(row.symbol, 0.0) + float(row.soft_risk_limit_usd)
+        per_symbol_budget[row.symbol] = symbol_budget
+        per_symbol_allocated[row.symbol] = per_symbol_allocated.get(row.symbol, 0.0) + float(
+            repo.current_open_risk_usd(
+                symbol=row.symbol,
+                venue=venue,
+                timeframe=row.timeframe,
+                execution_mode="sim",
+            )
+        )
+
+    cash_value = 0.0
+    asset_value = 0.0
+    rows: list[PortfolioBalanceAssetOut] = []
+    for symbol in sorted(per_symbol_budget.keys()):
+        budget = float(max(per_symbol_budget.get(symbol, 0.0), 0.0))
+        allocated = float(max(min(per_symbol_allocated.get(symbol, 0.0), budget), 0.0))
+        available = float(max(budget - allocated, 0.0))
+        cash_value += available
+        asset_value += allocated
+        rows.append(
+            PortfolioBalanceAssetOut(
+                asset=symbol,
+                free=float(available),
+                usd_price=1.0,
+                value_usd=float(budget),
+            )
+        )
+
+    total_value = cash_value + asset_value
+    cash_ratio = (cash_value / total_value) if total_value > 0 else 0.0
+    asset_ratio = (asset_value / total_value) if total_value > 0 else 0.0
+    return PortfolioBalancesOut(
+        mode="sim",
+        as_of=now,
+        total_value_usd=float(total_value),
+        cash_value_usd=float(cash_value),
+        asset_value_usd=float(asset_value),
+        cash_ratio=float(cash_ratio),
+        asset_ratio=float(asset_ratio),
+        note="Sim balances are derived from control-plane soft risk budgets and current open risk usage.",
+        assets=rows,
+    )
 
 
 @router.put("/control-plane/assets/{symbol:path}", response_model=AssetControlOut)

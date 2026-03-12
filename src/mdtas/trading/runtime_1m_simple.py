@@ -505,6 +505,51 @@ class Simple1mRuntime:
             if sizing.qty_final <= 0:
                 return
 
+            planned_entry_notional = float(bar["open"]) * float(sizing.qty_final)
+            current_symbol_risk = self.trading_repo.current_open_risk_usd(
+                symbol=symbol,
+                venue=venue,
+                timeframe=timeframe,
+                execution_mode=execution_mode,
+            )
+            available_actual_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            if execution_mode == "sim" and planned_entry_notional > available_actual_usd:
+                self._emit_decision(
+                    symbol,
+                    timeframe,
+                    ts,
+                    "hold",
+                    [
+                        "actual_balance_blocked",
+                        f"required={planned_entry_notional:.4f}",
+                        f"available={available_actual_usd:.4f}",
+                    ],
+                    tuning_version=tuning_version,
+                )
+                return
+
+            if cfg.max_position_notional_usd is not None and cfg.max_position_notional_usd > 0 and planned_entry_notional > cfg.max_position_notional_usd:
+                self._emit_decision(
+                    symbol,
+                    timeframe,
+                    ts,
+                    "hold",
+                    ["max_notional_blocked", f"notional={planned_entry_notional:.4f}", f"max={float(cfg.max_position_notional_usd):.4f}"],
+                    tuning_version=tuning_version,
+                )
+                return
+
+            if constraints.min_notional_usd > 0 and planned_entry_notional < constraints.min_notional_usd:
+                self._emit_decision(
+                    symbol,
+                    timeframe,
+                    ts,
+                    "hold",
+                    ["min_notional_blocked", f"notional={planned_entry_notional:.4f}", f"min={float(constraints.min_notional_usd):.4f}"],
+                    tuning_version=tuning_version,
+                )
+                return
+
             entry_fill = self.execution.submit_entry(
                 symbol=symbol,
                 raw_price=float(bar["open"]),

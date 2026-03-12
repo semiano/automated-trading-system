@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchRiskPolicySettings, fetchSymbols, updateAssetControl, updateAssetTuning, updateRiskPolicySettings, valueBalanceAsset } from "./api/client";
-import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, RiskPolicySettings } from "./api/types";
+import { API_BASE_URL, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchPortfolioBalances, fetchSymbols, updateAssetControl, updateAssetTuning, valueBalanceAsset } from "./api/client";
+import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
 import IngestionStatusPage from "./components/IngestionStatusPage";
@@ -108,10 +108,7 @@ export default function App() {
   const [pnlMode, setPnlMode] = useState<"sim" | "live">("sim");
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [portfolioInfo, setPortfolioInfo] = useState<string | null>(null);
-  const [riskPolicy, setRiskPolicy] = useState<RiskPolicySettings>({
-    risk_budget_policy: "per_symbol",
-    portfolio_soft_risk_limit_usd: 0,
-  });
+  const [portfolioBalances, setPortfolioBalances] = useState<PortfolioBalancesSnapshot | null>(null);
   const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
   const [catchupError, setCatchupError] = useState<string | null>(null);
   const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
@@ -288,10 +285,11 @@ export default function App() {
           failed.push("asset controls");
         });
 
-      await fetchRiskPolicySettings()
-        .then(setRiskPolicy)
+      await fetchPortfolioBalances({ mode: pnlMode })
+        .then(setPortfolioBalances)
         .catch(() => {
-          failed.push("risk policy");
+          setPortfolioBalances(null);
+          failed.push("portfolio balances");
         });
 
       if (failed.length > 0) {
@@ -327,14 +325,6 @@ export default function App() {
   const refreshAssetControls = async () => {
     const rows = await fetchAllAssetControls();
     setAssetControls(rows);
-  };
-
-  const saveRiskPolicy = async (payload: {
-    risk_budget_policy?: "per_symbol" | "portfolio";
-    portfolio_soft_risk_limit_usd?: number;
-  }) => {
-    const next = await updateRiskPolicySettings(payload);
-    setRiskPolicy(next);
   };
 
   const saveAssetControl = async (payload: {
@@ -497,14 +487,13 @@ export default function App() {
           closedTrades={closedTrades}
           totalNetPnl={totalNetPnl}
           assetControls={assetControls}
-          riskPolicy={riskPolicy}
+          portfolioBalances={portfolioBalances}
           pnlMode={pnlMode}
           onPnlMode={setPnlMode}
           onSaveAssetControl={saveAssetControl}
           onSaveAssetTuning={saveAssetTuning}
           onFetchAssetTuningVersions={loadAssetTuningVersions}
           onValueBalanceAsset={rebalanceAssetValue}
-          onSaveRiskPolicy={saveRiskPolicy}
         />
       ) : (
         <IngestionStatusPage rows={catchupRows} error={catchupError} updatedAt={catchupUpdatedAt} />
