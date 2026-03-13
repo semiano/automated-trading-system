@@ -847,12 +847,15 @@ def switch_control_plane_mode(
     live_adapters_by_timeframe: dict[str, CcxtExecutionAdapter] = {}
     paper_adapters_by_timeframe: dict[str, PaperExecutionAdapter] = {}
 
+    live_force_close_fill_tolerance = 0.995
+
     if payload.force_close_open_positions:
         for pos in open_positions:
             attempted_force_close += 1
             runtime_cfg = _runtime_config_for_timeframe(cfg, pos.timeframe)
             constraints = _constraints_for_symbol(runtime_cfg, pos.symbol)
             raw_exit_price = float(pos.last_price) if pos.last_price is not None else float(pos.entry_price)
+            requested_qty = float(pos.qty)
 
             try:
                 if from_mode == "live" and runtime_cfg.execution_adapter == "real":
@@ -867,6 +870,13 @@ def switch_control_plane_mode(
                         trade_side=pos.trade_side,
                         constraints=constraints,
                     )
+                    if requested_qty > 0:
+                        fill_ratio = float(fill.qty) / requested_qty
+                        if fill_ratio < live_force_close_fill_tolerance:
+                            raise ValueError(
+                                "Live force-close not fully filled on exchange "
+                                f"(filled={float(fill.qty):.8f}, requested={requested_qty:.8f}, ratio={fill_ratio:.4f})"
+                            )
                 else:
                     adapter = paper_adapters_by_timeframe.get(pos.timeframe)
                     if adapter is None:
