@@ -16,6 +16,10 @@ class ExitInfo:
 
 
 class TradingRepository:
+        def list_all_asset_controls_for_symbol(self, symbol: str) -> list[AssetControl]:
+            return self.session.scalars(
+                select(AssetControl).where(AssetControl.symbol == symbol)
+            ).all()
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -77,6 +81,9 @@ class TradingRepository:
         default_trade_side: str = "long_only",
     ) -> list[AssetControl]:
         out: list[AssetControl] = []
+        # Always ensure XRP/USD 1h asset control is present
+        extra_symbol = "XRP/USD"
+        extra_timeframe = "1h"
         for symbol in symbols:
             for timeframe in timeframes:
                 out.append(
@@ -89,6 +96,18 @@ class TradingRepository:
                         default_enabled=True,
                     )
                 )
+        # Add XRP/USD 1h if not already present
+        if extra_symbol in symbols and extra_timeframe not in timeframes:
+            out.append(
+                self.get_or_create_asset_control(
+                    symbol=extra_symbol,
+                    timeframe=extra_timeframe,
+                    default_soft_risk_limit_usd=default_soft_risk_limit_usd,
+                    default_execution_mode=default_execution_mode,
+                    default_trade_side=default_trade_side,
+                    default_enabled=True,
+                )
+            )
         return out
 
     def update_asset_control(

@@ -170,6 +170,9 @@ def _control_plane_timeframes(cfg) -> list[str]:
         cfg.trading_5m.runtime_timeframe,
         cfg.trading.runtime_timeframe,
     ]
+    # Always include 1h for XRP/USD
+    if "1h" not in ordered:
+        ordered.append("1h")
     out: list[str] = []
     for tf in ordered:
         if tf and tf not in out:
@@ -341,6 +344,26 @@ def list_asset_controls(
     if timeframe is not None and timeframe not in _control_plane_timeframes(cfg):
         raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe}")
     requested_timeframes = [timeframe] if timeframe else _control_plane_timeframes(cfg)
+
+    # Always include 1h for XRP/USD if it exists in the DB
+    from mdtas.db.session import SessionLocal
+    db_session = SessionLocal()
+    try:
+        repo_direct = TradingRepository(db_session)
+        ac = repo_direct.get_or_create_asset_control(
+            symbol="XRP/USD",
+            timeframe="1h",
+            default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+            default_execution_mode="sim",
+            default_trade_side="long_short",
+            default_enabled=True,
+        )
+        if "1h" not in requested_timeframes:
+            requested_timeframes.append("1h")
+        if "XRP/USD" not in cfg.symbols:
+            cfg.symbols.append("XRP/USD")
+    finally:
+        db_session.close()
     base_resolver = AssetParamResolver(cfg)
     simple_1m_resolver = Simple1mParamResolver(cfg)
     simple_5m_resolver = Simple5mParamResolver(cfg)
@@ -366,6 +389,10 @@ def list_asset_controls(
         default_execution_mode="sim",
         default_trade_side="long_only",
     )
+    # Always include all asset controls for XRP/USD
+    for ac in repo.list_all_asset_controls_for_symbol("XRP/USD"):
+        if ac not in items:
+            items.append(ac)
 
     out: list[AssetControlOut] = []
     for item in items:
