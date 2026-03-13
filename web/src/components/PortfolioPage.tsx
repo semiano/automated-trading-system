@@ -774,32 +774,45 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                               }
 
                               const bucket: "cash" | "asset" = row.rowType === "cash" ? "cash" : "asset";
-                              const targetSymbol = row.rowType === "cash"
-                                ? (() => {
-                                    const symbolInput = window.prompt(`Symbol for cash adjustment (${symbols.join(", ")})`, symbols[0]);
-                                    if (symbolInput == null) return null;
-                                    const picked = symbolInput.trim().toUpperCase();
-                                    const matched = symbols.find((s) => s.toUpperCase() === picked);
-                                    if (!matched) {
-                                      window.alert("Select a valid symbol from the control plane list.");
-                                      return null;
-                                    }
-                                    return matched;
-                                  })()
-                                : row.symbol;
-                              if (!targetSymbol) return;
-
-                              const input = window.prompt(`Set ${targetSymbol} ${bucket} balance to absolute USD amount (positive)`, "100");
+                              const input = window.prompt(
+                                row.rowType === "cash"
+                                  ? "Set portfolio cash balance to absolute USD amount"
+                                  : `Set ${row.symbol} asset balance to absolute USD amount`,
+                                "100"
+                              );
                               if (input == null) return;
                               const amount = Number(input);
-                              if (!Number.isFinite(amount) || amount <= 0) {
-                                window.alert("Enter a positive USD amount.");
+                              if (!Number.isFinite(amount) || amount < 0) {
+                                window.alert("Enter a non-negative USD amount.");
                                 return;
                               }
 
                               setAugmentingKey(row.symbol);
                               try {
-                                await onAugmentSimWallet({ symbol: targetSymbol, bucket, amount_usd: amount });
+                                if (row.rowType === "cash") {
+                                  const requiredBySymbol = new Map<string, number>();
+                                  for (const control of controlsForMode) {
+                                    requiredBySymbol.set(
+                                      control.symbol,
+                                      (requiredBySymbol.get(control.symbol) ?? 0) + Number(control.soft_risk_limit_usd || 0)
+                                    );
+                                  }
+
+                                  const totalRequired = Array.from(requiredBySymbol.values()).reduce((sum, value) => sum + value, 0);
+                                  let allocated = 0;
+                                  for (let i = 0; i < symbols.length; i += 1) {
+                                    const symbol = symbols[i];
+                                    const isLast = i === symbols.length - 1;
+                                    const weight = totalRequired > 0
+                                      ? (requiredBySymbol.get(symbol) ?? 0) / totalRequired
+                                      : 1 / symbols.length;
+                                    const targetAmount = isLast ? amount - allocated : amount * weight;
+                                    allocated += targetAmount;
+                                    await onAugmentSimWallet({ symbol, bucket: "cash", amount_usd: Math.max(targetAmount, 0) });
+                                  }
+                                } else {
+                                  await onAugmentSimWallet({ symbol: row.symbol, bucket, amount_usd: amount });
+                                }
                               } catch (err) {
                                 window.alert(err instanceof Error ? err.message : "Failed to set sim wallet balance");
                               } finally {

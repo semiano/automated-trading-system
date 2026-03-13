@@ -227,7 +227,7 @@ class AssetValueBalanceOut(BaseModel):
 
 class SimWalletAugmentRequest(BaseModel):
     bucket: str = Field(default="cash")
-    amount_usd: float = Field(gt=0.0)
+    amount_usd: float = Field(ge=0.0)
 
 
 class SimWalletAugmentOut(BaseModel):

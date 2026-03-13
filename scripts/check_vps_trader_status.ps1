@@ -34,10 +34,19 @@ echo "=== momentum config ==="
 grep -E '^(  bb_entry_mode|  momentum_swing_enabled|  momentum_pivot_left_bars|  momentum_pivot_right_bars|  momentum_lookback_bars|  momentum_roc_length|  momentum_min_roc)' config.yaml || true
 
 echo "=== service status ==="
-docker compose --env-file .env.docker ps api ingestion trader
+docker compose --env-file .env.docker ps api ingestion trader trader_5m trader_1h
+
+echo "=== ingestion logs (5m) ==="
+docker compose --env-file .env.docker logs --since 5m ingestion | tail -n 80 || true
 
 echo "=== trader logs (5m) ==="
 docker compose --env-file .env.docker logs --since 5m trader | tail -n 80 || true
+
+echo "=== trader_5m logs (5m) ==="
+docker compose --env-file .env.docker logs --since 5m trader_5m | tail -n 80 || true
+
+echo "=== trader_1h logs (5m) ==="
+docker compose --env-file .env.docker logs --since 5m trader_1h | tail -n 80 || true
 '@ | Set-Content -Path $remote -NoNewline
 
 try {

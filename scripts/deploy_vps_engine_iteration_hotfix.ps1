@@ -159,10 +159,20 @@ fi
 # Remove stale TypeScript emit artifacts that can shadow .ts sources in Vite.
 rm -f web/src/api/client.js web/src/api/types.js
 
-docker compose --env-file .env.docker up -d --build api trader trader_5m trader_1h web
+docker compose --env-file .env.docker up -d --build api ingestion trader trader_5m trader_1h web
+
+echo "=== watchdog verification ==="
+required_services="api ingestion trader trader_5m trader_1h web"
+for svc in $required_services; do
+    status=$(docker compose --env-file .env.docker ps --status running --services | grep -x "$svc" || true)
+    if [ -z "$status" ]; then
+        echo "watchdog: service '$svc' is not running; restarting"
+        docker compose --env-file .env.docker up -d "$svc"
+    fi
+done
 
 echo "=== service status ==="
-docker compose --env-file .env.docker ps api trader trader_5m trader_1h web
+docker compose --env-file .env.docker ps api ingestion trader trader_5m trader_1h web
 '@ | Set-Content -Path $remoteScript -NoNewline
 
 try {
