@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { CatchupStatusRow } from "../api/types";
+import { formatDateTimeWithZone, formatTimeWithZone, getClientTimeZone, getClientTimeZoneLabel } from "../utils/time";
 
 type Props = {
   rows: CatchupStatusRow[];
@@ -8,11 +9,12 @@ type Props = {
 };
 
 function fmt(ts?: string | null): string {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleString();
+  return formatDateTimeWithZone(ts);
 }
 
 export default function IngestionStatusPage({ rows, error, updatedAt }: Props) {
+  const tz = getClientTimeZone();
+  const tzLabel = getClientTimeZoneLabel();
   const [symbolFilter, setSymbolFilter] = useState("all");
   const [timeframeFilter, setTimeframeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "caught_up" | "catching_up">("all");
@@ -70,7 +72,10 @@ export default function IngestionStatusPage({ rows, error, updatedAt }: Props) {
   return (
     <div style={{ padding: 12 }}>
       <div style={{ marginBottom: 10, fontSize: 12, color: "#b4bccf" }}>
-        Last refresh: {updatedAt ? updatedAt.toLocaleTimeString() : "-"}
+        Last refresh: {formatTimeWithZone(updatedAt)}
+      </div>
+      <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
+        Timezone: {tzLabel} ({tz})
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 8, marginBottom: 10 }}>

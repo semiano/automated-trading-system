@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAssetLogs, fetchCandles, fetchIndicators } from "../api/client";
 import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot } from "../api/types";
 import { num } from "../utils/formatting";
+import { formatDateTimeWithZone, formatDateWithZone, getClientTimeZone, getClientTimeZoneLabel, parseApiTimestamp as parseApiTsDate } from "../utils/time";
 
 type Props = {
   openPositions: OpenPosition[];
@@ -118,6 +119,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const [tuningSaving, setTuningSaving] = useState(false);
   const [rebalancingSymbol, setRebalancingSymbol] = useState<string | null>(null);
   const [augmentingKey, setAugmentingKey] = useState<string | null>(null);
+  const [settingAllBalances, setSettingAllBalances] = useState(false);
   const [filterSymbol, setFilterSymbol] = useState<string>("all");
   const [filterTimeframe, setFilterTimeframe] = useState<string>("all");
   const [filterSide, setFilterSide] = useState<string>("all");
@@ -195,10 +197,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   });
 
   const parseApiTimestamp = (value: string | null | undefined): Date | null => {
-    if (!value) return null;
-    const normalized = /([zZ]|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
-    const parsed = new Date(normalized);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    return parseApiTsDate(value);
   };
 
   const parseApiTsMillis = (value: string | null | undefined): number => {
@@ -476,7 +475,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     }
     const endTime = maxTime;
     for (let t = startDay.getTime(); t <= endTime; t += 86_400_000) {
-      dayGridLines.push({ x: xFor(t), label: new Date(t).toLocaleDateString() });
+      dayGridLines.push({ x: xFor(t), label: formatDateWithZone(new Date(t)) });
     }
 
     return { dots, points, ticks, yFor, dayGridLines };
@@ -488,6 +487,8 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const hoverDot = activeHoverIndex !== null && chartStats ? chartStats.dots[activeHoverIndex] : null;
   const balancesMode = portfolioBalances?.mode ?? pnlMode;
   const isSimBalances = balancesMode === "sim";
+  const clientTz = getClientTimeZone();
+  const clientTzLabel = getClientTimeZoneLabel();
   const freeLabel = isSimBalances ? "Available Cash (USD)" : "Free Qty";
   const freeTitle = isSimBalances
     ? "SIM: available cash after applying realized/unrealized PnL and open notional commitments."
@@ -713,8 +714,61 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
               : "LIVE mode: balances are exchange free balances valued in USD."}
           </div>
           <div style={{ color: "#9ca3af" }}>
-            As Of: {portfolioBalances?.as_of ? new Date(portfolioBalances.as_of).toLocaleString() : "-"}
+            As Of: {formatDateTimeWithZone(portfolioBalances?.as_of)}
           </div>
+          <div style={{ color: "#9ca3af" }}>
+            Timezone: {clientTzLabel} ({clientTz})
+          </div>
+          {isSimBalances ? (
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                disabled={settingAllBalances}
+                onClick={async () => {
+                  const controlsForMode = assetControls.filter((c) => c.execution_mode === balancesMode);
+                  const symbols = Array.from(new Set(controlsForMode.map((c) => c.symbol))).sort();
+                  if (symbols.length === 0) {
+                    window.alert("No symbols available for SIM wallet adjustment.");
+                    return;
+                  }
+
+                  const confirmed = window.confirm("Set all SIM symbol cash+asset actual balances to their current required USD values?");
+                  if (!confirmed) return;
+
+                  const requiredBySymbol = new Map<string, number>();
+                  for (const control of controlsForMode) {
+                    requiredBySymbol.set(
+                      control.symbol,
+                      (requiredBySymbol.get(control.symbol) ?? 0) + Number(control.soft_risk_limit_usd || 0)
+                    );
+                  }
+
+                  setSettingAllBalances(true);
+                  try {
+                    for (const symbol of symbols) {
+                      const required = Math.max(Number(requiredBySymbol.get(symbol) ?? 0), 0);
+                      await onAugmentSimWallet({ symbol, bucket: "cash", amount_usd: required });
+                      await onAugmentSimWallet({ symbol, bucket: "asset", amount_usd: required });
+                    }
+                  } catch (err) {
+                    window.alert(err instanceof Error ? err.message : "Failed to set all balances");
+                  } finally {
+                    setSettingAllBalances(false);
+                  }
+                }}
+                style={{
+                  border: "1px solid #2d3340",
+                  background: "transparent",
+                  color: "inherit",
+                  borderRadius: 4,
+                  padding: "5px 10px",
+                  cursor: settingAllBalances ? "default" : "pointer",
+                }}
+              >
+                {settingAllBalances ? "Applying..." : "Set All To Actual"}
+              </button>
+            </div>
+          ) : null}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
@@ -1077,7 +1131,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                     <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:risk`)}>{num(row.current_risk_usd, 4)}</span>
                   </td>
                   <td style={{ padding: 8 }}>
-                    <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:last`)}>{parseApiTimestamp(row.last_run_ts)?.toLocaleString() ?? "-"}</span>
+                    <span style={cellPulseStyle(`${row.symbol}:${row.timeframe}:last`)}>{formatDateTimeWithZone(row.last_run_ts)}</span>
                     <span style={{ color: "#9ca3af", marginLeft: 6 }}>
                       {row.last_evaluated_state ? `(${formatAssetState(row.last_evaluated_state, row.last_evaluated_note)})` : ""}
                     </span>
@@ -1315,7 +1369,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                           <td style={{ padding: 6 }}>
                             v{v.version} {v.is_active ? <span style={{ color: "#85e89d" }}>(active)</span> : null}
                           </td>
-                          <td style={{ padding: 6 }}>{new Date(v.created_at).toLocaleString()}</td>
+                          <td style={{ padding: 6 }}>{formatDateTimeWithZone(v.created_at)}</td>
                           <td style={{ padding: 6 }}>{v.source ?? "-"}</td>
                           <td style={{ padding: 6 }}>{v.note ?? "-"}</td>
                         </tr>
@@ -1379,7 +1433,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   <tbody>
                     {logRows.map((row) => (
                       <tr key={row.id} style={{ borderTop: "1px solid #1b1f29" }}>
-                        <td style={{ padding: 8 }}>{new Date(row.created_at).toLocaleString()}</td>
+                        <td style={{ padding: 8 }}>{formatDateTimeWithZone(row.created_at)}</td>
                         <td style={{ padding: 8 }}>{row.timeframe}</td>
                         <td style={{ padding: 8 }}>{row.state}</td>
                         <td style={{ padding: 8 }}>{row.note ?? "-"}</td>
@@ -1529,7 +1583,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
           )}
           {hoverDot ? (
             <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 6, border: "1px solid #334155", background: "#101827", fontSize: 11, color: "#cbd5e1", display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span>{new Date(hoverDot.trade.exit_ts).toLocaleString()}</span>
+              <span>{formatDateTimeWithZone(hoverDot.trade.exit_ts)}</span>
               <span>{hoverDot.trade.symbol}</span>
               <span>{hoverDot.trade.timeframe}</span>
               <span>{hoverDot.trade.trade_side === "short" ? "Short" : "Long"}</span>
@@ -1629,7 +1683,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                   const rowBg = idx % 2 === 0 ? "transparent" : "#0d1118";
                   return (
                     <tr key={row.id} style={{ borderTop: "1px solid #1b1f29", background: rowBg }}>
-                      <td style={{ padding: 8 }}>{new Date(row.exit_ts).toLocaleString()}</td>
+                      <td style={{ padding: 8 }}>{formatDateTimeWithZone(row.exit_ts)}</td>
                       <td style={{ padding: 8, fontWeight: 600 }}>{row.symbol}</td>
                       <td style={{ padding: 8 }}>{row.execution_mode === "sim" ? "Sim" : "Real"}</td>
                       <td style={{ padding: 8 }}>{row.timeframe}</td>
@@ -1772,8 +1826,8 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                     <>
                       <div style={{ marginBottom: 8, fontSize: 12, color: "#cbd5e1", display: "flex", flexWrap: "wrap", gap: 14 }}>
                         <span>Window Bars: <strong>{previewRows.length}</strong> ({beforeBars} before, {insideBars} in-trade, {afterBars} after)</span>
-                        <span>Entry: <strong>{new Date(previewTrade.entry_ts).toLocaleString()}</strong></span>
-                        <span>Exit: <strong>{new Date(previewTrade.exit_ts).toLocaleString()}</strong></span>
+                        <span>Entry: <strong>{formatDateTimeWithZone(previewTrade.entry_ts)}</strong></span>
+                        <span>Exit: <strong>{formatDateTimeWithZone(previewTrade.exit_ts)}</strong></span>
                         <span>Entry Spot/Fill: <strong>{previewTrade.entry_spot_price != null ? num(previewTrade.entry_spot_price, 6) : "-"} / {num(previewTrade.entry_price, 6)}</strong></span>
                         <span style={{ color: slippageTone(previewTrade.entry_slippage_usd) }}>Entry Slip: <strong>{slippageLabel(previewTrade.entry_slippage_bps, previewTrade.entry_slippage_usd)}</strong></span>
                         <span>Exit Spot/Fill: <strong>{previewTrade.exit_spot_price != null ? num(previewTrade.exit_spot_price, 6) : "-"} / {num(previewTrade.exit_price, 6)}</strong></span>
@@ -1828,7 +1882,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       </svg>
                       {activeRow ? (
                         <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 6, border: "1px solid #334155", background: "#101827", fontSize: 11, color: "#cbd5e1", display: "flex", gap: 12, flexWrap: "wrap" }}>
-                          <span>{new Date(activeRow.ts).toLocaleString()}</span>
+                          <span>{formatDateTimeWithZone(activeRow.ts)}</span>
                           <span>O {num(activeRow.open, 6)}</span>
                           <span>H {num(activeRow.high, 6)}</span>
                           <span>L {num(activeRow.low, 6)}</span>

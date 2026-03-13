@@ -1,19 +1,13 @@
 import React from "react";
 import type { AssetControl, OpenPosition } from "../api/types";
 import { num } from "../utils/formatting";
+import { formatDateTimeWithZone, getClientTimeZone, getClientTimeZoneLabel } from "../utils/time";
 
 type Props = {
   symbol: string;
   assetControl?: AssetControl;
   openPositions: OpenPosition[];
 };
-
-function parseApiTimestamp(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const normalized = /([zZ]|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
-  const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
 
 function formatAssetState(state: string | null | undefined, note: string | null | undefined): string {
   if (!state) return "-";
@@ -31,9 +25,12 @@ function formatAssetState(state: string | null | undefined, note: string | null 
 }
 
 export default function SelectedAssetLivePanel({ symbol, assetControl, openPositions }: Props) {
+  const tz = getClientTimeZone();
+  const tzLabel = getClientTimeZoneLabel();
   return (
     <section style={{ borderBottom: "1px solid #22262f" }}>
       <div style={{ padding: "8px 10px", fontSize: 12, fontWeight: 600 }}>Selected Asset Live Data — {symbol}</div>
+      <div style={{ padding: "0 10px 8px 10px", fontSize: 11, color: "#9ca3af" }}>Timezone: {tzLabel} ({tz})</div>
       <div style={{ overflowX: "auto", borderTop: "1px solid #1b1f29" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
@@ -71,8 +68,8 @@ export default function SelectedAssetLivePanel({ symbol, assetControl, openPosit
                   : "-"}
               </td>
               <td style={{ textAlign: "right", padding: 8 }}>{assetControl ? num(assetControl.current_risk_usd, 4) : "-"}</td>
-              <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.last_run_ts)?.toLocaleString() ?? "-"}</td>
-              <td style={{ padding: 8 }}>{parseApiTimestamp(assetControl?.next_run_ts)?.toLocaleString() ?? "-"}</td>
+              <td style={{ padding: 8 }}>{formatDateTimeWithZone(assetControl?.last_run_ts)}</td>
+              <td style={{ padding: 8 }}>{formatDateTimeWithZone(assetControl?.next_run_ts)}</td>
               <td style={{ padding: 8 }}>{formatAssetState(assetControl?.last_evaluated_state, assetControl?.last_evaluated_note)}</td>
             </tr>
           </tbody>

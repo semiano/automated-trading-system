@@ -6,6 +6,7 @@ import VolumeProfile from "./VolumeProfile";
 import DataHealthPanel from "./DataHealthPanel";
 import { buildVolumeProfile } from "../utils/volumeProfile";
 import { num } from "../utils/formatting";
+import { formatDateTimeWithZone, getClientTimeZone, getClientTimeZoneLabel } from "../utils/time";
 
 type TradeMarker = {
   ts: string;
@@ -260,6 +261,8 @@ function computeBbMetric(
 }
 
 export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, openPositions, closedTrades, assetControl, crosshair, setCrosshair, chartDataCap }: Props) {
+  const tz = getClientTimeZone();
+  const tzLabel = getClientTimeZoneLabel();
   const profile = useMemo(() => buildVolumeProfile(rows), [rows]);
   const row = crosshair ?? rows[rows.length - 1] ?? null;
   const rowIndex = row ? rows.findIndex((r) => r.ts === row.ts) : -1;
@@ -1307,19 +1310,22 @@ export default function ChartLayout({ timeframe, rows, gaps, overlays, panels, o
           <div style={{ margin: "8px 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid #3e4d63", background: "#121b29", color: "#c5d6ee", fontSize: 11 }}>
             <strong style={{ color: "#dbeafe" }}>Render cap active:</strong> showing most recent {chartDataCap.shownRows.toLocaleString()} of {chartDataCap.totalRows.toLocaleString()} points (limit={chartDataCap.capLimit.toLocaleString()}).
             <div style={{ marginTop: 4, color: "#9fb3cc" }}>
-              Omitted {chartDataCap.omittedRows.toLocaleString()} points from {chartDataCap.omittedStartTs} to {chartDataCap.omittedEndTs}.
+              Omitted {chartDataCap.omittedRows.toLocaleString()} points from {formatDateTimeWithZone(chartDataCap.omittedStartTs)} to {formatDateTimeWithZone(chartDataCap.omittedEndTs)}.
             </div>
             <div style={{ color: "#9fb3cc" }}>
-              Visible range: {chartDataCap.visibleStartTs} to {chartDataCap.visibleEndTs}.
+              Visible range: {formatDateTimeWithZone(chartDataCap.visibleStartTs)} to {formatDateTimeWithZone(chartDataCap.visibleEndTs)}.
             </div>
           </div>
         ) : null}
         <div style={{ margin: "8px 10px", border: "1px solid #2b3442", borderRadius: 8, background: "#121722", padding: "8px 10px" }}>
           <div style={{ fontSize: 11, color: "#93a3b8", marginBottom: 6 }}>
-            Engine Inputs @ {row?.ts ?? "n/a"}
+            Timezone: {tzLabel} ({tz})
           </div>
           <div style={{ fontSize: 11, color: "#93a3b8", marginBottom: 6 }}>
-            Runtime evaluates previous closed bar: {evalRow?.ts ?? "n/a"}
+            Engine Inputs @ {row?.ts ? formatDateTimeWithZone(row.ts) : "n/a"}
+          </div>
+          <div style={{ fontSize: 11, color: "#93a3b8", marginBottom: 6 }}>
+            Runtime evaluates previous closed bar: {evalRow?.ts ? formatDateTimeWithZone(evalRow.ts) : "n/a"}
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
             <span>Engine symbol {assetControl?.symbol ?? "n/a"}</span>
