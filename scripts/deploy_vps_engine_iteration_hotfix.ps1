@@ -79,6 +79,7 @@ $files = @(
     "src/mdtas/db/trading_repo.py",
     "src/mdtas/trading/execution.py",
     "src/mdtas/trading/runtime.py",
+    "src/mdtas/trading/sizing_policy.py",
     "src/mdtas/indicators/engine.py",
     "src/mdtas/trading/runtime_1m_simple.py",
     "src/mdtas/trading/runtime_5m_simple.py",
