@@ -366,6 +366,49 @@ class Simple5mRuntime:
             logger.debug("5m HTF RSI multiplier fallback to 1.0: %s", exc)
             return 1.0
 
+    def _sim_wallet_available_usd(
+        self,
+        *,
+        symbol: str,
+        venue: str,
+        timeframe: str,
+        soft_risk_limit_usd: float,
+    ) -> tuple[float, float]:
+        realized = float(self.trading_repo.realized_net_pnl_by_symbol(execution_mode="sim").get(symbol, 0.0))
+        open_positions = self.trading_repo.list_open_positions(
+            symbol=symbol,
+            venue=venue,
+            timeframe=timeframe,
+            execution_mode="sim",
+        )
+
+        open_long_notional = 0.0
+        open_short_notional = 0.0
+        unrealized = 0.0
+        for pos in open_positions:
+            mark = float(pos.last_price) if pos.last_price is not None else float(pos.entry_price)
+            qty = float(pos.qty)
+            notional = abs(mark * qty)
+            if pos.trade_side == "short":
+                open_short_notional += notional
+                gross = (float(pos.entry_price) - mark) * qty
+            else:
+                open_long_notional += notional
+                gross = (mark - float(pos.entry_price)) * qty
+            unrealized += float(gross) - float(pos.entry_fee)
+
+        equity = max(float(soft_risk_limit_usd) + realized + unrealized, 0.0)
+        baseline_asset = equity * 0.5
+        baseline_cash = equity * 0.5
+
+        balance_row = self.trading_repo.get_or_create_sim_wallet_balance(symbol)
+        cash_adjustment = float(balance_row.cash_adjustment_usd)
+        asset_adjustment = float(balance_row.asset_adjustment_usd)
+
+        asset_available = max(baseline_asset + open_long_notional - open_short_notional + asset_adjustment, 0.0)
+        cash_available = max(baseline_cash - open_long_notional + open_short_notional + cash_adjustment, 0.0)
+        return float(cash_available), float(asset_available)
+
     def evaluate_symbol(self, symbol: str, venue: str) -> None:
         cfg = self.cfg.trading_5m
         if not cfg.enabled:
@@ -513,6 +556,15 @@ class Simple5mRuntime:
                 execution_mode=execution_mode,
             )
             available_actual_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            if execution_mode == "sim":
+                sim_cash_usd, sim_asset_usd = self._sim_wallet_available_usd(
+                    symbol=symbol,
+                    venue=venue,
+                    timeframe=timeframe,
+                    soft_risk_limit_usd=float(control.soft_risk_limit_usd),
+                )
+                available_actual_usd = sim_cash_usd if chosen_side == "long" else sim_asset_usd
+            balance_bucket = "cash" if chosen_side == "long" else "asset"
             if execution_mode == "sim" and planned_entry_notional > available_actual_usd:
                 self._emit_decision(
                     symbol,
@@ -521,6 +573,8 @@ class Simple5mRuntime:
                     "hold",
                     [
                         "actual_balance_blocked",
+                        f"side={chosen_side}",
+                        f"bucket={balance_bucket}",
                         f"required={planned_entry_notional:.4f}",
                         f"available={available_actual_usd:.4f}",
                     ],
@@ -575,6 +629,7 @@ class Simple5mRuntime:
                 execution_mode=execution_mode,
                 trade_side=chosen_side,
                 entry_ts=ts,
+                entry_spot_price=float(entry_fill.spot_price) if entry_fill.spot_price is not None else float(bar["open"]),
                 entry_price=float(entry_fill.price),
                 qty=float(entry_fill.qty),
                 entry_fee=float(entry_fill.fee_usd),
@@ -587,7 +642,13 @@ class Simple5mRuntime:
                 timeframe,
                 ts,
                 "enter_long" if chosen_side == "long" else "enter_short",
-                [f"bb_dev={bb_dev:.3f}", f"flatten_ratio={flatten_ratio:.3f}"],
+                [
+                    f"bb_dev={bb_dev:.3f}",
+                    f"flatten_ratio={flatten_ratio:.3f}",
+                    f"balance_bucket={balance_bucket}",
+                    f"required={planned_entry_notional:.4f}",
+                    f"available={available_actual_usd:.4f}",
+                ],
                 tuning_version=tuning_version,
             )
             return
@@ -650,6 +711,7 @@ class Simple5mRuntime:
             open_position,
             exit_ts=ts,
             exit_price=float(exit_fill.price),
+            exit_spot_price=float(exit_fill.spot_price) if exit_fill.spot_price is not None else float(exit_raw),
             exit_reason=exit_reason,
             exit_fee=float(exit_fill.fee_usd),
             hold_bars_at_exit=hold_bars,

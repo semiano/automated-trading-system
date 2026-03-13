@@ -85,6 +85,19 @@ class _DummyTradingRepo:
         )
         return 42.0 if symbol is None else 7.0
 
+    def get_or_create_sim_wallet_balance(self, symbol):
+        class _Row:
+            cash_adjustment_usd = 0.0
+            asset_adjustment_usd = 0.0
+
+        return _Row()
+
+    def realized_net_pnl_by_symbol(self, execution_mode=None):
+        return {}
+
+    def list_open_positions(self, **kwargs):
+        return []
+
 
 class _DummyCandleRepo:
     pass
@@ -373,3 +386,38 @@ def test_dynamic_volatility_override_allows_low_atr_short_when_above_band_is_ext
 
     assert short_ok is True
     assert "dyn_vol_short_outside_ratio" in note
+
+
+def test_sim_wallet_available_usd_is_side_aware_with_adjustments():
+    cfg = AppConfig()
+    repo = _DummyTradingRepo()
+
+    class _Pos:
+        def __init__(self, side: str, entry_price: float, last_price: float, qty: float, entry_fee: float) -> None:
+            self.trade_side = side
+            self.entry_price = entry_price
+            self.last_price = last_price
+            self.qty = qty
+            self.entry_fee = entry_fee
+
+    class _Row:
+        cash_adjustment_usd = 20.0
+        asset_adjustment_usd = 10.0
+
+    repo.realized_net_pnl_by_symbol = lambda execution_mode=None: {"XRP/USDT": 5.0}
+    repo.list_open_positions = lambda **kwargs: [
+        _Pos("long", entry_price=10.0, last_price=10.0, qty=3.0, entry_fee=0.0),
+        _Pos("short", entry_price=10.0, last_price=10.0, qty=1.0, entry_fee=0.0),
+    ]
+    repo.get_or_create_sim_wallet_balance = lambda symbol: _Row()
+
+    runtime = TradingRuntime(cfg=cfg, candle_repo=_DummyCandleRepo(), trading_repo=repo)
+    cash_available, asset_available = runtime._sim_wallet_available_usd(
+        symbol="XRP/USDT",
+        venue="coinbase",
+        timeframe="1m",
+        soft_risk_limit_usd=100.0,
+    )
+
+    assert cash_available == 52.5
+    assert asset_available == 82.5

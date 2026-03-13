@@ -16,7 +16,7 @@ class CcxtConfig(BaseModel):
     api_key: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_KEY"))
     api_secret: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_SECRET"))
     api_password: str | None = Field(default_factory=lambda: os.getenv("EXCHANGE_API_PASSWORD"))
-    sandbox: bool = Field(default_factory=lambda: os.getenv("EXCHANGE_SANDBOX", "true").lower() == "true")
+    sandbox: bool = Field(default_factory=lambda: os.getenv("EXCHANGE_SANDBOX", "false").lower() == "true")
 
 
 class ProvidersConfig(BaseModel):

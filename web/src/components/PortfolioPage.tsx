@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAssetLogs, fetchCandles, fetchIndicators } from "../api/client";
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot } from "../api/types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, ClosedTrade, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot } from "../api/types";
 import { num } from "../utils/formatting";
 
 type Props = {
@@ -9,6 +9,7 @@ type Props = {
   totalNetPnl: number;
   assetControls: AssetControl[];
   portfolioBalances: PortfolioBalancesSnapshot | null;
+  liveReadiness: LiveReadiness | null;
   pnlMode: "sim" | "live";
   onPnlMode: (mode: "sim" | "live") => void;
   onSaveAssetControl: (payload: {
@@ -46,6 +47,11 @@ type Props = {
     target_base_ratio?: number;
     tolerance_bps?: number;
   }) => Promise<void>;
+  onAugmentSimWallet: (payload: {
+    symbol: string;
+    bucket: "cash" | "asset";
+    amount_usd: number;
+  }) => Promise<void>;
 };
 
 function timeframeColor(tf: string): string {
@@ -82,7 +88,21 @@ function usd(value: number): string {
   return value.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, portfolioBalances, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset }: Props) {
+function slippageLabel(bps: number | null | undefined, impactUsd: number | null | undefined): string {
+  if (bps == null || impactUsd == null) return "-";
+  const bpsText = `${num(bps, 2)} bps`;
+  const usdText = impactUsd >= 0 ? `+${usd(impactUsd)}` : usd(impactUsd);
+  return `${bpsText} (${usdText})`;
+}
+
+function slippageTone(impactUsd: number | null | undefined): string {
+  if (impactUsd == null) return "inherit";
+  if (impactUsd > 0) return "#fca5a5";
+  if (impactUsd < 0) return "#86efac";
+  return "#cbd5e1";
+}
+
+export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl, assetControls, portfolioBalances, liveReadiness, pnlMode, onPnlMode, onSaveAssetControl, onSaveAssetTuning, onFetchAssetTuningVersions, onValueBalanceAsset, onAugmentSimWallet }: Props) {
   const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [logSymbol, setLogSymbol] = useState<string | null>(null);
@@ -97,6 +117,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const [tuningLoading, setTuningLoading] = useState(false);
   const [tuningSaving, setTuningSaving] = useState(false);
   const [rebalancingSymbol, setRebalancingSymbol] = useState<string | null>(null);
+  const [augmentingSymbol, setAugmentingSymbol] = useState<string | null>(null);
   const [filterSymbol, setFilterSymbol] = useState<string>("all");
   const [filterTimeframe, setFilterTimeframe] = useState<string>("all");
   const [filterSide, setFilterSide] = useState<string>("all");
@@ -467,17 +488,17 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const hoverDot = activeHoverIndex !== null && chartStats ? chartStats.dots[activeHoverIndex] : null;
   const balancesMode = portfolioBalances?.mode ?? pnlMode;
   const isSimBalances = balancesMode === "sim";
-  const freeLabel = isSimBalances ? "Available (USD)" : "Free Qty";
+  const freeLabel = isSimBalances ? "Available Cash (USD)" : "Free Qty";
   const freeTitle = isSimBalances
-    ? "SIM: remaining budget available for that symbol after subtracting current open risk usage."
+    ? "SIM: available cash after applying realized/unrealized PnL and open notional commitments."
     : "LIVE: free exchange quantity for this asset/currency.";
   const pxLabel = isSimBalances ? "Unit (USD)" : "USD Price";
   const pxTitle = isSimBalances
     ? "SIM: fixed to 1.0 because values are already represented in USD budget units."
     : "LIVE: inferred USD conversion price used for valuation.";
-  const valueLabel = isSimBalances ? "Budget (USD)" : "Value (USD)";
+  const valueLabel = isSimBalances ? "Equity (USD)" : "Value (USD)";
   const valueTitle = isSimBalances
-    ? "SIM: total configured budget represented by this row (used + available)."
+    ? "SIM: symbol equity = budget + realized PnL + unrealized PnL."
     : "LIVE: USD-marked value of free quantity for this asset/currency.";
 
   const fundingRows = useMemo(() => {
@@ -487,40 +508,136 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
       requiredBySymbol.set(row.symbol, (requiredBySymbol.get(row.symbol) ?? 0) + Number(row.soft_risk_limit_usd || 0));
     }
 
-    const actualBySymbol = new Map<string, number>();
-
-    if (isSimBalances) {
-      for (const row of portfolioBalances?.assets ?? []) {
-        actualBySymbol.set(row.asset, Number(row.free || 0));
-      }
-    } else {
-      for (const row of controlsForMode) {
-        const live = row.live_balance;
-        if (!live) continue;
-        const baseFree = Number(live.base_free ?? 0);
-        const quoteFree = Number(live.quote_free ?? 0);
-        const px = Number(live.price ?? 0);
-        const actual = (Number.isFinite(baseFree) ? baseFree : 0) * (Number.isFinite(px) ? px : 0) + (Number.isFinite(quoteFree) ? quoteFree : 0);
-        if (!Number.isFinite(actual)) continue;
-        actualBySymbol.set(row.symbol, Math.max(actualBySymbol.get(row.symbol) ?? 0, actual));
-      }
+    const currencyFree = new Map<string, number>();
+    const currencyValueUsd = new Map<string, number>();
+    for (const row of portfolioBalances?.assets ?? []) {
+      const ccy = String(row.asset || "").toUpperCase();
+      if (!ccy) continue;
+      currencyFree.set(ccy, Number(row.free || 0));
+      currencyValueUsd.set(ccy, Number(row.value_usd || 0));
     }
 
-    const symbols = Array.from(new Set([...requiredBySymbol.keys(), ...actualBySymbol.keys()])).sort();
-    return symbols.map((symbol) => {
+    const symbolsForTable = new Set<string>(requiredBySymbol.keys());
+    for (const row of assetControls) symbolsForTable.add(row.symbol);
+    if (!isSimBalances && symbolsForTable.size === 0) {
+      for (const row of portfolioBalances?.assets ?? []) symbolsForTable.add(row.asset);
+    }
+
+    const splitSymbol = (value: string): { base: string; quote: string | null } => {
+      if (value.includes("/")) {
+        const [base, quote] = value.split("/", 2);
+        return { base: base.toUpperCase(), quote: quote.toUpperCase() };
+      }
+      return { base: value.toUpperCase(), quote: null };
+    };
+
+    const assetRows = Array.from(symbolsForTable).sort().map((symbol) => {
       const required = requiredBySymbol.get(symbol) ?? 0;
-      const actual = actualBySymbol.get(symbol) ?? 0;
-      const gap = actual - required;
+      const { base, quote } = splitSymbol(symbol);
+
+      let assetQty = 0;
+      let assetUsd = 0;
+      let cashQty = 0;
+      let cashUsd = 0;
+      let price = 0;
+
+      if (isSimBalances) {
+        const simRow = (portfolioBalances?.assets ?? []).find((r) => r.asset === symbol);
+        const equity = Number(simRow?.value_usd || 0);
+        const availableCash = Number(simRow?.free || 0);
+        cashUsd = Math.max(availableCash, 0);
+        assetUsd = Math.max(equity - cashUsd, 0);
+        cashQty = cashUsd;
+        assetQty = assetUsd;
+        price = 1.0;
+      } else {
+        assetQty = Number(currencyFree.get(base) || 0);
+        assetUsd = Number(currencyValueUsd.get(base) || 0);
+        if (quote) {
+          cashQty = Number(currencyFree.get(quote) || 0);
+          cashUsd = Number(currencyValueUsd.get(quote) || 0);
+        }
+
+        const liveRow = controlsForMode.find((r) => r.symbol === symbol && r.live_balance?.price != null);
+        const livePx = Number(liveRow?.live_balance?.price || 0);
+        if (Number.isFinite(livePx) && livePx > 0) {
+          price = livePx;
+        } else if (assetQty > 0 && assetUsd > 0) {
+          price = assetUsd / assetQty;
+        }
+
+        if (!quote && assetUsd <= 0 && cashUsd <= 0) {
+          const currencyRow = (portfolioBalances?.assets ?? []).find((r) => String(r.asset).toUpperCase() === base);
+          if (currencyRow) {
+            assetQty = Number(currencyRow.free || 0);
+            assetUsd = Number(currencyRow.value_usd || 0);
+            if (assetQty > 0 && assetUsd > 0) price = assetUsd / assetQty;
+          }
+        }
+      }
+
+      const actual = assetUsd;
       const ratio = required > 0 ? actual / required : null;
+      const gapUsd = actual - required;
+      const requiredQty = price > 0 ? required / price : null;
+      const gapQty = price > 0 ? gapUsd / price : null;
       let status: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target" = "no_target";
+
       if (required > 0) {
         if (ratio !== null && ratio < 0.5) status = "critical";
         else if (ratio !== null && ratio < 0.9) status = "needs_alignment";
         else if (ratio !== null && ratio > 1.5) status = "surplus";
         else status = "aligned";
+      } else if (actual > 0 || cashUsd > 0) {
+        status = "aligned";
       }
-      return { symbol, required, actual, gap, ratio, status };
+
+      return {
+        rowType: "asset" as const,
+        symbol,
+        required,
+        actual,
+        ratio,
+        requiredQty,
+        actualQty: assetQty,
+        gapUsd,
+        gapQty,
+        cashUsd,
+        cashQty,
+        status,
+      };
     });
+
+    const totalRequiredCashUsd = assetRows.reduce((sum, row) => sum + row.required, 0);
+    const totalActualCashUsd = assetRows.reduce((sum, row) => sum + row.cashUsd, 0);
+    const totalActualCashQty = assetRows.reduce((sum, row) => sum + row.cashQty, 0);
+    const cashGapUsd = totalActualCashUsd - totalRequiredCashUsd;
+    let cashStatus: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target" = "no_target";
+    if (totalRequiredCashUsd > 0) {
+      const ratio = totalActualCashUsd / totalRequiredCashUsd;
+      if (ratio < 0.5) cashStatus = "critical";
+      else if (ratio < 0.9) cashStatus = "needs_alignment";
+      else if (ratio > 1.5) cashStatus = "surplus";
+      else cashStatus = "aligned";
+    }
+
+    return [
+      ...assetRows,
+      {
+        rowType: "cash" as const,
+        symbol: "CASH (PORTFOLIO)",
+        required: totalRequiredCashUsd,
+        actual: totalActualCashUsd,
+        ratio: totalRequiredCashUsd > 0 ? totalActualCashUsd / totalRequiredCashUsd : null,
+        requiredQty: totalRequiredCashUsd,
+        actualQty: totalActualCashQty,
+        gapUsd: cashGapUsd,
+        gapQty: cashGapUsd,
+        cashUsd: totalActualCashUsd,
+        cashQty: totalActualCashQty,
+        status: cashStatus,
+      },
+    ];
   }, [assetControls, balancesMode, isSimBalances, portfolioBalances]);
 
   const fundingBadge = (status: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target") => {
@@ -578,9 +695,21 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             </span>
           </div>
           {portfolioBalances?.note ? <div style={{ color: "#9ca3af" }}>{portfolioBalances.note}</div> : null}
+          {liveReadiness ? (
+            <div style={{ color: "#c7ced8" }}>
+              Live Readiness: <strong style={{ color: liveReadiness.balance_readable ? "#86efac" : "#fca5a5" }}>{liveReadiness.balance_readable ? "balance OK" : "balance failed"}</strong>
+              {" | "}venue=<strong>{liveReadiness.venue}</strong>
+              {" | "}sandbox=<strong>{liveReadiness.sandbox ? "on" : "off"}</strong>
+              {" | "}keys=<strong>{liveReadiness.api_key_present && liveReadiness.api_secret_present ? "present" : "missing"}</strong>
+              {" | "}real adapter=<strong>{liveReadiness.real_adapter_enabled_any ? "enabled" : "disabled"}</strong>
+              {" | "}live orders=<strong>{liveReadiness.live_order_enabled_any ? "enabled" : "disabled"}</strong>
+            </div>
+          ) : null}
+          {liveReadiness?.note ? <div style={{ color: "#9ca3af" }}>{liveReadiness.note}</div> : null}
+          {!liveReadiness?.balance_readable && liveReadiness?.balance_error ? <div style={{ color: "#fca5a5" }}>{liveReadiness.balance_error}</div> : null}
           <div style={{ color: "#9ca3af" }}>
             {isSimBalances
-              ? "SIM mode: balances are budget-based, not exchange wallet balances."
+              ? "SIM mode: balances are trade-aware simulation balances (cash, exposure, and equity), not exchange wallets."
               : "LIVE mode: balances are exchange free balances valued in USD."}
           </div>
           <div style={{ color: "#9ca3af" }}>
@@ -590,33 +719,91 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: 8 }}>Asset</th>
-                  <th style={{ textAlign: "right", padding: 8 }} title="Theoretical required capital from control-plane soft risk limits.">Required (USD)</th>
-                  <th style={{ textAlign: "right", padding: 8 }} title={isSimBalances ? "SIM: currently available budget after open-risk usage." : "LIVE: wallet value for this symbol, using base_qty*price + quote_qty."}>Actual (USD)</th>
-                  <th style={{ textAlign: "right", padding: 8 }} title="Actual minus Required. Negative means underfunded.">Gap (USD)</th>
+                  <th style={{ textAlign: "left", padding: 8 }}>Balance Row</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Required balance in USD and units.">Balance Required (USD | Units)</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Actual balance in USD and units.">Balance Actual (USD | Units)</th>
+                  <th style={{ textAlign: "right", padding: 8 }} title="Actual minus Required in USD and units.">Gap (USD | Units)</th>
                   <th style={{ textAlign: "right", padding: 8 }} title="Actual/Required ratio.">Coverage</th>
                   <th style={{ textAlign: "left", padding: 8 }} title="Color-coded alignment indicator for balancing or funding action.">Status</th>
+                  <th style={{ textAlign: "left", padding: 8 }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {fundingRows.length === 0 ? (
                   <tr>
-                    <td style={{ padding: 8 }} colSpan={6}>No balance rows.</td>
+                    <td style={{ padding: 8 }} colSpan={7}>No balance rows.</td>
                   </tr>
                 ) : (
                   fundingRows.map((row) => {
                     const badge = fundingBadge(row.status);
                     return (
                     <tr key={row.symbol} style={{ borderTop: "1px solid #1b1f29" }}>
-                      <td style={{ padding: 8 }}>{row.symbol}</td>
-                      <td style={{ textAlign: "right", padding: 8 }}>{num(row.required, 2)}</td>
-                      <td style={{ textAlign: "right", padding: 8 }}>{num(row.actual, 2)}</td>
-                      <td style={{ textAlign: "right", padding: 8, color: row.gap < 0 ? "#fca5a5" : "#86efac" }}>{num(row.gap, 2)}</td>
+                      <td style={{ padding: 8 }}>
+                        <div>{row.rowType === "cash" ? "Cash Balance" : row.symbol}</div>
+                        {row.rowType === "asset" ? <div style={{ color: "#9ca3af" }}>Asset leg</div> : <div style={{ color: "#9ca3af" }}>Portfolio cash row</div>}
+                      </td>
+                      <td style={{ textAlign: "right", padding: 8 }}>
+                        <div>{usd(row.required)}</div>
+                        <div style={{ color: "#9ca3af" }}>{row.requiredQty == null ? "-" : num(row.requiredQty, 6)}</div>
+                      </td>
+                      <td style={{ textAlign: "right", padding: 8 }}>
+                        <div>{usd(row.actual)}</div>
+                        <div style={{ color: "#9ca3af" }}>{num(row.actualQty, 6)}</div>
+                      </td>
+                      <td style={{ textAlign: "right", padding: 8, color: row.gapUsd < 0 ? "#fca5a5" : "#86efac" }}>
+                        <div>{num(row.gapUsd, 2)}</div>
+                        <div style={{ color: "#9ca3af" }}>{row.gapQty == null ? "-" : num(row.gapQty, 6)}</div>
+                      </td>
                       <td style={{ textAlign: "right", padding: 8 }}>{row.ratio == null ? "-" : `${num(row.ratio * 100, 1)}%`}</td>
                       <td style={{ padding: 8 }}>
                         <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: badge.bg, color: badge.fg, fontWeight: 600 }}>
                           {badge.text}
                         </span>
+                      </td>
+                      <td style={{ padding: 8 }}>
+                        {isSimBalances && row.rowType === "asset" ? (
+                          <button
+                            type="button"
+                            disabled={augmentingSymbol === row.symbol}
+                            onClick={async () => {
+                              const bucketInput = window.prompt(`Bucket for ${row.symbol}: cash or asset`, "asset");
+                              if (bucketInput == null) return;
+                              const parsedBucket = bucketInput.trim().toLowerCase();
+                              if (parsedBucket !== "cash" && parsedBucket !== "asset") {
+                                window.alert("Bucket must be cash or asset.");
+                                return;
+                              }
+                              const bucket: "cash" | "asset" = parsedBucket;
+                              const input = window.prompt(`Augment ${row.symbol} ${bucket} balance by USD amount`, "100");
+                              if (input == null) return;
+                              const amount = Number(input);
+                              if (!Number.isFinite(amount) || amount <= 0) {
+                                window.alert("Enter a positive USD amount.");
+                                return;
+                              }
+                              setAugmentingSymbol(row.symbol);
+                              try {
+                                await onAugmentSimWallet({ symbol: row.symbol, bucket, amount_usd: amount });
+                              } catch (err) {
+                                window.alert(err instanceof Error ? err.message : "Failed to augment sim wallet");
+                              } finally {
+                                setAugmentingSymbol(null);
+                              }
+                            }}
+                            style={{
+                              border: "1px solid #2d3340",
+                              background: "transparent",
+                              color: "inherit",
+                              borderRadius: 4,
+                              padding: "3px 8px",
+                              cursor: augmentingSymbol === row.symbol ? "default" : "pointer",
+                            }}
+                          >
+                            {augmentingSymbol === row.symbol ? "Augmenting..." : "Augment"}
+                          </button>
+                        ) : (
+                          <span style={{ color: "#6b7280" }}>-</span>
+                        )}
                       </td>
                     </tr>
                     );
@@ -627,8 +814,8 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
           </div>
           <div style={{ color: "#9ca3af" }}>
             {isSimBalances
-              ? "SIM Actual uses currently available budget (after open trades). Required uses control-plane soft risk limits."
-              : "LIVE Actual uses free wallet value inferred per symbol from base/quote balances and market price. Required uses control-plane soft risk limits."}
+              ? "SIM rows show required/actual/gap per asset leg plus an aggregate cash row sourced from the virtual SIM wallet."
+              : "LIVE rows show required/actual/gap per asset leg plus an aggregate cash row from exchange cash balances."}
           </div>
           <div style={{ color: "#9ca3af" }}>
             Raw fields: {freeLabel}, {pxLabel}, {valueLabel}.
@@ -1318,6 +1505,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
               <span>{hoverDot.trade.timeframe}</span>
               <span>{hoverDot.trade.trade_side === "short" ? "Short" : "Long"}</span>
               <span>Trade Net {num(hoverDot.trade.net_pnl, 6)}</span>
+              <span style={{ color: slippageTone(hoverDot.trade.total_slippage_usd) }}>Slip {slippageLabel(hoverDot.trade.entry_slippage_bps != null && hoverDot.trade.exit_slippage_bps != null ? hoverDot.trade.entry_slippage_bps + hoverDot.trade.exit_slippage_bps : null, hoverDot.trade.total_slippage_usd)}</span>
               <span>Cum {yMode === "pct" ? `${num(hoverDot.value, 3)}%` : num(hoverDot.value, 6)}</span>
               <span>Reason {hoverDot.trade.exit_reason}</span>
             </div>
@@ -1387,8 +1575,12 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                 <th style={{ textAlign: "left", padding: 8 }}>TF</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Length</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Side</th>
-                <th style={{ textAlign: "right", padding: 8 }}>Entry</th>
-                <th style={{ textAlign: "right", padding: 8 }}>Exit</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Entry Fill</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Entry Spot</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Entry Slip</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Exit Fill</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Exit Spot</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Exit Slip</th>
                 <th style={{ textAlign: "right", padding: 8 }}>P&amp;L Qty $</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Net P&amp;L</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Return %</th>
@@ -1399,7 +1591,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
             </thead>
             <tbody>
               {filteredClosedTrades.length === 0 ? (
-                <tr><td style={{ padding: 8 }} colSpan={14}>No closed trades.</td></tr>
+                <tr><td style={{ padding: 8 }} colSpan={18}>No closed trades.</td></tr>
               ) : (
                 filteredClosedTrades.map((row, idx) => {
                   const notionalUsd = row.entry_price * row.qty;
@@ -1415,7 +1607,11 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                       <td style={{ textAlign: "right", padding: 8 }}>{tradeLengthLabel(row)}</td>
                       <td style={{ padding: 8 }}>{row.trade_side === "short" ? "Short" : "Long"}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{num(row.entry_price, 6)}</td>
+                      <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{row.entry_spot_price != null ? num(row.entry_spot_price, 6) : "-"}</td>
+                      <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace", color: slippageTone(row.entry_slippage_usd) }}>{slippageLabel(row.entry_slippage_bps, row.entry_slippage_usd)}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{num(row.exit_price, 6)}</td>
+                      <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{row.exit_spot_price != null ? num(row.exit_spot_price, 6) : "-"}</td>
+                      <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace", color: slippageTone(row.exit_slippage_usd) }}>{slippageLabel(row.exit_slippage_bps, row.exit_slippage_usd)}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace" }}>{usd(notionalUsd)}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace", color: pnlPositive ? "#34d399" : "#f87171", fontWeight: 600 }}>{usd(row.net_pnl)}</td>
                       <td style={{ textAlign: "right", padding: 8, fontFamily: "monospace", color: pnlPositive ? "#34d399" : "#f87171" }}>{num(row.return_pct, 3)}%</td>
@@ -1549,6 +1745,11 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         <span>Window Bars: <strong>{previewRows.length}</strong> ({beforeBars} before, {insideBars} in-trade, {afterBars} after)</span>
                         <span>Entry: <strong>{new Date(previewTrade.entry_ts).toLocaleString()}</strong></span>
                         <span>Exit: <strong>{new Date(previewTrade.exit_ts).toLocaleString()}</strong></span>
+                        <span>Entry Spot/Fill: <strong>{previewTrade.entry_spot_price != null ? num(previewTrade.entry_spot_price, 6) : "-"} / {num(previewTrade.entry_price, 6)}</strong></span>
+                        <span style={{ color: slippageTone(previewTrade.entry_slippage_usd) }}>Entry Slip: <strong>{slippageLabel(previewTrade.entry_slippage_bps, previewTrade.entry_slippage_usd)}</strong></span>
+                        <span>Exit Spot/Fill: <strong>{previewTrade.exit_spot_price != null ? num(previewTrade.exit_spot_price, 6) : "-"} / {num(previewTrade.exit_price, 6)}</strong></span>
+                        <span style={{ color: slippageTone(previewTrade.exit_slippage_usd) }}>Exit Slip: <strong>{slippageLabel(previewTrade.exit_slippage_bps, previewTrade.exit_slippage_usd)}</strong></span>
+                        <span style={{ color: slippageTone(previewTrade.total_slippage_usd) }}>Total Slip Impact: <strong>{previewTrade.total_slippage_usd != null ? usd(previewTrade.total_slippage_usd) : "-"}</strong></span>
                         <span>Reason: <strong>{previewTrade.exit_reason}</strong></span>
                       </div>
                       <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block", background: "#0b1119", borderRadius: 8, border: "1px solid #1f2937" }}>

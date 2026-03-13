@@ -63,8 +63,15 @@ class ClosedTradeOut(BaseModel):
     trade_side: str
     entry_ts: datetime
     exit_ts: datetime
+    entry_spot_price: float | None = None
+    exit_spot_price: float | None = None
     entry_price: float
     exit_price: float
+    entry_slippage_bps: float | None = None
+    entry_slippage_usd: float | None = None
+    exit_slippage_bps: float | None = None
+    exit_slippage_usd: float | None = None
+    total_slippage_usd: float | None = None
     qty: float
     gross_pnl: float
     fees: float
@@ -103,6 +110,20 @@ class TraderConfigReloadStatusOut(BaseModel):
     last_event_note: str | None
     last_success_ts: datetime | None
     last_failure_ts: datetime | None
+
+
+class LiveReadinessOut(BaseModel):
+    venue: str
+    sandbox: bool
+    api_key_present: bool
+    api_secret_present: bool
+    real_adapter_enabled_any: bool
+    live_order_enabled_any: bool
+    live_ack_required_any: bool
+    live_ack_satisfied_any: bool
+    balance_readable: bool
+    balance_error: str | None = None
+    note: str | None = None
 
 
 class RiskPolicyUpdate(BaseModel):
@@ -201,6 +222,20 @@ class AssetValueBalanceOut(BaseModel):
     post_quote_qty: float
     base_value_ratio_before: float | None
     base_value_ratio_after: float | None
+    note: str
+
+
+class SimWalletAugmentRequest(BaseModel):
+    bucket: str = Field(default="cash")
+    amount_usd: float = Field(gt=0.0)
+
+
+class SimWalletAugmentOut(BaseModel):
+    symbol: str
+    bucket: str
+    amount_usd: float
+    cash_adjustment_usd: float
+    asset_adjustment_usd: float
     note: str
 
 

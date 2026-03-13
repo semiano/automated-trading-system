@@ -80,6 +80,19 @@ class _Repo:
     def touch_position(self, position, hold_bars, last_price):
         return None
 
+    def realized_net_pnl_by_symbol(self, execution_mode=None):
+        return {}
+
+    def list_open_positions(self, **kwargs):
+        return []
+
+    def get_or_create_sim_wallet_balance(self, symbol):
+        class _Row:
+            cash_adjustment_usd = 0.0
+            asset_adjustment_usd = 0.0
+
+        return _Row()
+
 
 class _CandleRepo:
     def get_candles(self, **kwargs):

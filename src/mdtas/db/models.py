@@ -86,6 +86,7 @@ class Position(Base):
     trade_side: Mapped[str] = mapped_column(String(16), index=True, default="long")
     status: Mapped[str] = mapped_column(String(16), index=True, default="open")
     entry_ts: Mapped[datetime] = mapped_column(DateTime(timezone=False), index=True)
+    entry_spot_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     entry_price: Mapped[float] = mapped_column(Float)
     qty: Mapped[float] = mapped_column(Float)
     entry_fee: Mapped[float] = mapped_column(Float, default=0.0)
@@ -117,6 +118,8 @@ class Trade(Base):
     trade_side: Mapped[str] = mapped_column(String(16), index=True, default="long")
     entry_ts: Mapped[datetime] = mapped_column(DateTime(timezone=False), index=True)
     exit_ts: Mapped[datetime] = mapped_column(DateTime(timezone=False), index=True)
+    entry_spot_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_spot_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     entry_price: Mapped[float] = mapped_column(Float)
     exit_price: Mapped[float] = mapped_column(Float)
     qty: Mapped[float] = mapped_column(Float)
@@ -142,6 +145,23 @@ class TradingControl(Base):
     soft_risk_limit_usd: Mapped[float] = mapped_column(Float, default=150.0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class SimWalletBalance(Base):
+    __tablename__ = "sim_wallet_balances"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    cash_adjustment_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    asset_adjustment_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", name="uq_sim_wallet_balance_symbol"),
+        Index("idx_sim_wallet_balance_symbol", "symbol"),
     )
 
 

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
-from mdtas.db.models import AssetControl, AssetEngineLog, AssetTuningVersion, Position, Trade
+from mdtas.db.models import AssetControl, AssetEngineLog, AssetTuningVersion, Position, SimWalletBalance, Trade
 
 
 @dataclass(slots=True)
@@ -16,10 +16,11 @@ class ExitInfo:
 
 
 class TradingRepository:
-        def list_all_asset_controls_for_symbol(self, symbol: str) -> list[AssetControl]:
-            return self.session.scalars(
-                select(AssetControl).where(AssetControl.symbol == symbol)
-            ).all()
+    def list_all_asset_controls_for_symbol(self, symbol: str) -> list[AssetControl]:
+        return self.session.scalars(
+            select(AssetControl).where(AssetControl.symbol == symbol)
+        ).all()
+
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -328,6 +329,7 @@ class TradingRepository:
         execution_mode: str,
         trade_side: str,
         entry_ts: datetime,
+        entry_spot_price: float | None,
         entry_price: float,
         qty: float,
         entry_fee: float,
@@ -343,6 +345,7 @@ class TradingRepository:
             trade_side=trade_side,
             status="open",
             entry_ts=entry_ts,
+            entry_spot_price=entry_spot_price,
             entry_price=entry_price,
             qty=qty,
             entry_fee=entry_fee,
@@ -368,10 +371,12 @@ class TradingRepository:
         position: Position,
         exit_ts: datetime,
         exit_price: float,
+        exit_spot_price: float | None,
         exit_reason: str,
         exit_fee: float,
         hold_bars_at_exit: int | None = None,
     ) -> Trade:
+        # PnL is intentionally computed from executable fills so entry/exit slippage is reflected in returns.
         gross_pnl = (exit_price - position.entry_price) * position.qty
         if position.trade_side == "short":
             gross_pnl = (position.entry_price - exit_price) * position.qty
@@ -392,6 +397,8 @@ class TradingRepository:
             trade_side=position.trade_side,
             entry_ts=position.entry_ts,
             exit_ts=exit_ts,
+            entry_spot_price=float(position.entry_spot_price) if position.entry_spot_price is not None else None,
+            exit_spot_price=float(exit_spot_price) if exit_spot_price is not None else None,
             entry_price=position.entry_price,
             exit_price=exit_price,
             qty=position.qty,
@@ -430,6 +437,13 @@ class TradingRepository:
                 unit_risk = max(entry_price - stop_price, 0.0)
             total += (unit_risk * float(item.qty)) + float(item.entry_fee)
         return float(total)
+
+    def realized_net_pnl_by_symbol(self, execution_mode: str | None = None) -> dict[str, float]:
+        stmt = select(Trade.symbol, func.sum(Trade.net_pnl)).group_by(Trade.symbol)
+        if execution_mode is not None:
+            stmt = stmt.where(Trade.execution_mode == execution_mode)
+        rows = self.session.execute(stmt).all()
+        return {str(symbol): float(total or 0.0) for symbol, total in rows}
 
     def count_entries(
         self,
@@ -478,3 +492,38 @@ class TradingRepository:
         if row is None:
             return None
         return ExitInfo(ts=row.exit_ts, reason=row.exit_reason)
+
+    def get_or_create_sim_wallet_balance(self, symbol: str) -> SimWalletBalance:
+        row = self.session.scalar(
+            select(SimWalletBalance)
+            .where(SimWalletBalance.symbol == symbol)
+            .limit(1)
+        )
+        if row is None:
+            row = SimWalletBalance(
+                symbol=symbol,
+                cash_adjustment_usd=0.0,
+                asset_adjustment_usd=0.0,
+            )
+            self.session.add(row)
+            self.session.commit()
+            self.session.refresh(row)
+        return row
+
+    def list_sim_wallet_balances(self) -> list[SimWalletBalance]:
+        return self.session.scalars(
+            select(SimWalletBalance).order_by(SimWalletBalance.symbol.asc())
+        ).all()
+
+    def augment_sim_wallet_balance(self, *, symbol: str, bucket: str, amount_usd: float) -> SimWalletBalance:
+        row = self.get_or_create_sim_wallet_balance(symbol)
+        delta = float(amount_usd)
+        if bucket == "cash":
+            row.cash_adjustment_usd = float(row.cash_adjustment_usd) + delta
+        elif bucket == "asset":
+            row.asset_adjustment_usd = float(row.asset_adjustment_usd) + delta
+        else:
+            raise ValueError("bucket must be one of: cash, asset")
+        self.session.commit()
+        self.session.refresh(row)
+        return row

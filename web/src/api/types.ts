@@ -72,8 +72,15 @@ export type ClosedTrade = {
   trade_side: "long" | "short";
   entry_ts: string;
   exit_ts: string;
+  entry_spot_price?: number | null;
+  exit_spot_price?: number | null;
   entry_price: number;
   exit_price: number;
+  entry_slippage_bps?: number | null;
+  entry_slippage_usd?: number | null;
+  exit_slippage_bps?: number | null;
+  exit_slippage_usd?: number | null;
+  total_slippage_usd?: number | null;
   qty: number;
   gross_pnl: number;
   fees: number;
@@ -192,6 +199,29 @@ export type PortfolioBalancesSnapshot = {
   asset_ratio: number;
   note?: string | null;
   assets: PortfolioBalanceAsset[];
+};
+
+export type SimWalletAugmentResponse = {
+  symbol: string;
+  bucket: "cash" | "asset";
+  amount_usd: number;
+  cash_adjustment_usd: number;
+  asset_adjustment_usd: number;
+  note: string;
+};
+
+export type LiveReadiness = {
+  venue: string;
+  sandbox: boolean;
+  api_key_present: boolean;
+  api_secret_present: boolean;
+  real_adapter_enabled_any: boolean;
+  live_order_enabled_any: boolean;
+  live_ack_required_any: boolean;
+  live_ack_satisfied_any: boolean;
+  balance_readable: boolean;
+  balance_error?: string | null;
+  note?: string | null;
 };
 
 export type CatchupStatusRow = {

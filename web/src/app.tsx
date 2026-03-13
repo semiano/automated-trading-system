@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchOpenPositions, fetchPortfolioBalances, fetchSymbols, updateAssetControl, updateAssetTuning, valueBalanceAsset } from "./api/client";
-import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot } from "./api/types";
+import { API_BASE_URL, augmentSimWalletBalance, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchLiveReadiness, fetchOpenPositions, fetchPortfolioBalances, fetchSymbols, updateAssetControl, updateAssetTuning, valueBalanceAsset } from "./api/client";
+import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
 import IngestionStatusPage from "./components/IngestionStatusPage";
@@ -109,6 +109,7 @@ export default function App() {
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [portfolioInfo, setPortfolioInfo] = useState<string | null>(null);
   const [portfolioBalances, setPortfolioBalances] = useState<PortfolioBalancesSnapshot | null>(null);
+  const [liveReadiness, setLiveReadiness] = useState<LiveReadiness | null>(null);
   const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
   const [catchupError, setCatchupError] = useState<string | null>(null);
   const [catchupUpdatedAt, setCatchupUpdatedAt] = useState<Date | null>(null);
@@ -292,6 +293,13 @@ export default function App() {
           failed.push("portfolio balances");
         });
 
+      await fetchLiveReadiness()
+        .then(setLiveReadiness)
+        .catch(() => {
+          setLiveReadiness(null);
+          failed.push("live readiness");
+        });
+
       if (failed.length > 0) {
         setPortfolioError(`Control plane fetch failed: ${failed.join(", ")}. API base: ${API_BASE_URL}`);
       } else {
@@ -346,6 +354,14 @@ export default function App() {
   }) => {
     await valueBalanceAsset(payload);
     await refreshAssetControls();
+  };
+
+  const augmentSimWallet = async (payload: {
+    symbol: string;
+    bucket: "cash" | "asset";
+    amount_usd: number;
+  }) => {
+    await augmentSimWalletBalance(payload);
   };
 
   const saveAssetTuning = async (payload: {
@@ -488,12 +504,14 @@ export default function App() {
           totalNetPnl={totalNetPnl}
           assetControls={assetControls}
           portfolioBalances={portfolioBalances}
+          liveReadiness={liveReadiness}
           pnlMode={pnlMode}
           onPnlMode={setPnlMode}
           onSaveAssetControl={saveAssetControl}
           onSaveAssetTuning={saveAssetTuning}
           onFetchAssetTuningVersions={loadAssetTuningVersions}
           onValueBalanceAsset={rebalanceAssetValue}
+          onAugmentSimWallet={augmentSimWallet}
         />
       ) : (
         <IngestionStatusPage rows={catchupRows} error={catchupError} updatedAt={catchupUpdatedAt} />

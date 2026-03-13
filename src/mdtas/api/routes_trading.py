@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
+from typing import Any
 
+import ccxt
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -18,9 +21,12 @@ from mdtas.api.schemas import (
     ClosedTradesResponse,
     AssetValueBalanceOut,
     AssetValueBalanceRequest,
+    SimWalletAugmentOut,
+    SimWalletAugmentRequest,
     OpenPositionOut,
     RiskPolicyOut,
     RiskPolicyUpdate,
+    LiveReadinessOut,
     TraderConfigReloadStatusOut,
 )
 from mdtas.config import get_config
@@ -105,20 +111,24 @@ _USD_EQUIV_QUOTES = {"USD", "USDT", "USDC", "BUSD", "DAI", "FDUSD", "USDP"}
 
 
 def _usd_price_for_currency(*, adapter: CcxtExecutionAdapter, currency: str) -> float | None:
+    return _usd_price_for_exchange_currency(exchange=adapter.exchange, currency=currency)
+
+
+def _usd_price_for_exchange_currency(*, exchange: Any, currency: str) -> float | None:
     ccy = currency.upper()
     if ccy in _USD_EQUIV_QUOTES:
         return 1.0
 
     for market in (f"{ccy}/USDT", f"{ccy}/USD"):
         try:
-            ticker = adapter.exchange.fetch_ticker(market)
+            ticker = exchange.fetch_ticker(market)
             return _price_from_ticker(ticker)
         except Exception:  # noqa: BLE001
             continue
 
     for market in (f"USDT/{ccy}", f"USD/{ccy}"):
         try:
-            ticker = adapter.exchange.fetch_ticker(market)
+            ticker = exchange.fetch_ticker(market)
             px = _price_from_ticker(ticker)
             if px > 0:
                 return 1.0 / px
@@ -146,6 +156,29 @@ def _build_live_adapter(cfg, runtime_cfg) -> CcxtExecutionAdapter:
     )
 
 
+def _build_readonly_exchange(cfg) -> Any:
+    venue_name = cfg.providers.ccxt.venue
+    venue_cls = getattr(ccxt, venue_name, None)
+    if venue_cls is None:
+        raise HTTPException(status_code=422, detail=f"Unsupported ccxt venue: {venue_name}")
+
+    kwargs: dict[str, object] = {
+        "enableRateLimit": bool(cfg.providers.ccxt.rate_limit),
+    }
+    if cfg.providers.ccxt.api_key:
+        kwargs["apiKey"] = cfg.providers.ccxt.api_key
+    if cfg.providers.ccxt.api_secret:
+        kwargs["secret"] = cfg.providers.ccxt.api_secret
+    if cfg.providers.ccxt.api_password:
+        kwargs["password"] = cfg.providers.ccxt.api_password
+
+    exchange = venue_cls(kwargs)
+    if bool(cfg.providers.ccxt.sandbox) and hasattr(exchange, "set_sandbox_mode"):
+        exchange.set_sandbox_mode(True)
+    exchange.load_markets()
+    return exchange
+
+
 def _constraints_for_symbol(runtime_cfg, symbol: str) -> SymbolExecutionConstraints:
     c = runtime_cfg.per_asset_constraints.get(symbol, runtime_cfg.default_constraints)
     return SymbolExecutionConstraints(
@@ -156,12 +189,43 @@ def _constraints_for_symbol(runtime_cfg, symbol: str) -> SymbolExecutionConstrai
     )
 
 
+def _leg_slippage(
+    *,
+    trade_side: str,
+    leg: str,
+    spot_price: float | None,
+    fill_price: float,
+    qty: float,
+) -> tuple[float | None, float | None]:
+    if spot_price is None:
+        return None, None
+    spot = float(spot_price)
+    if spot <= 0:
+        return None, None
+
+    fill = float(fill_price)
+    if leg == "entry":
+        # Positive means adverse slippage (costlier entry from trader perspective).
+        signed = (fill - spot) if trade_side == "long" else (spot - fill)
+    else:
+        # Positive means adverse slippage (worse exit from trader perspective).
+        signed = (spot - fill) if trade_side == "long" else (fill - spot)
+
+    bps = (signed / spot) * 10000.0
+    usd = signed * float(qty)
+    return float(bps), float(usd)
+
+
 def _runtime_config_for_timeframe(cfg, timeframe: str):
     if timeframe == cfg.trading_1m.runtime_timeframe:
         return cfg.trading_1m
     if timeframe == cfg.trading_5m.runtime_timeframe:
         return cfg.trading_5m
     return cfg.trading
+
+
+def _runtime_configs(cfg) -> list[Any]:
+    return [cfg.trading_1m, cfg.trading_5m, cfg.trading]
 
 
 def _control_plane_timeframes(cfg) -> list[str]:
@@ -303,28 +367,57 @@ def closed_trades(
     mode = _validate_mode(execution_mode)
     rows = repo.list_closed_trades(symbol=symbol, venue=venue, timeframe=timeframe, execution_mode=mode, limit=limit)
 
-    payload_rows = [
-        ClosedTradeOut(
-            id=item.id,
-            symbol=item.symbol,
-            venue=item.venue,
-            timeframe=item.timeframe,
-            execution_mode=item.execution_mode,
+    payload_rows: list[ClosedTradeOut] = []
+    for item in rows:
+        qty = float(item.qty)
+        entry_spot = float(item.entry_spot_price) if item.entry_spot_price is not None else None
+        exit_spot = float(item.exit_spot_price) if item.exit_spot_price is not None else None
+        entry_slip_bps, entry_slip_usd = _leg_slippage(
             trade_side=item.trade_side,
-            entry_ts=item.entry_ts,
-            exit_ts=item.exit_ts,
-            entry_price=float(item.entry_price),
-            exit_price=float(item.exit_price),
-            qty=float(item.qty),
-            gross_pnl=float(item.gross_pnl),
-            fees=float(item.fees),
-            net_pnl=float(item.net_pnl),
-            return_pct=float(item.return_pct),
-            exit_reason=item.exit_reason,
-            hold_bars_at_exit=int(item.hold_bars_at_exit) if item.hold_bars_at_exit is not None else None,
+            leg="entry",
+            spot_price=entry_spot,
+            fill_price=float(item.entry_price),
+            qty=qty,
         )
-        for item in rows
-    ]
+        exit_slip_bps, exit_slip_usd = _leg_slippage(
+            trade_side=item.trade_side,
+            leg="exit",
+            spot_price=exit_spot,
+            fill_price=float(item.exit_price),
+            qty=qty,
+        )
+        total_slippage_usd = None
+        if entry_slip_usd is not None or exit_slip_usd is not None:
+            total_slippage_usd = float((entry_slip_usd or 0.0) + (exit_slip_usd or 0.0))
+
+        payload_rows.append(
+            ClosedTradeOut(
+                id=item.id,
+                symbol=item.symbol,
+                venue=item.venue,
+                timeframe=item.timeframe,
+                execution_mode=item.execution_mode,
+                trade_side=item.trade_side,
+                entry_ts=item.entry_ts,
+                exit_ts=item.exit_ts,
+                entry_spot_price=entry_spot,
+                exit_spot_price=exit_spot,
+                entry_price=float(item.entry_price),
+                exit_price=float(item.exit_price),
+                entry_slippage_bps=entry_slip_bps,
+                entry_slippage_usd=entry_slip_usd,
+                exit_slippage_bps=exit_slip_bps,
+                exit_slippage_usd=exit_slip_usd,
+                total_slippage_usd=total_slippage_usd,
+                qty=qty,
+                gross_pnl=float(item.gross_pnl),
+                fees=float(item.fees),
+                net_pnl=float(item.net_pnl),
+                return_pct=float(item.return_pct),
+                exit_reason=item.exit_reason,
+                hold_bars_at_exit=int(item.hold_bars_at_exit) if item.hold_bars_at_exit is not None else None,
+            )
+        )
 
     return ClosedTradesResponse(
         count=len(payload_rows),
@@ -537,24 +630,9 @@ def get_portfolio_balances(
     now = datetime.now(timezone.utc)
 
     if execution_mode == "live":
-        timeframes = _control_plane_timeframes(cfg)
-        live_runtime = next((_runtime_config_for_timeframe(cfg, tf) for tf in timeframes if _runtime_config_for_timeframe(cfg, tf).execution_adapter == "real"), None)
-        if live_runtime is None:
-            return PortfolioBalancesOut(
-                mode="live",
-                as_of=now,
-                total_value_usd=0.0,
-                cash_value_usd=0.0,
-                asset_value_usd=0.0,
-                cash_ratio=0.0,
-                asset_ratio=0.0,
-                note="No live runtime configured yet. Set one or more assets to live mode and configure exchange credentials.",
-                assets=[],
-            )
-
         try:
-            adapter = _build_live_adapter(cfg, live_runtime)
-            balance = adapter.exchange.fetch_balance()
+            exchange = _build_readonly_exchange(cfg)
+            balance = exchange.fetch_balance()
         except Exception as exc:  # noqa: BLE001
             return PortfolioBalancesOut(
                 mode="live",
@@ -585,7 +663,7 @@ def get_portfolio_balances(
                 continue
             usd_px = None
             try:
-                usd_px = _usd_price_for_currency(adapter=adapter, currency=ccy)
+                usd_px = _usd_price_for_exchange_currency(exchange=exchange, currency=ccy)
             except Exception as exc:  # noqa: BLE001
                 valuation_warnings.append(f"{ccy}:{exc}")
             value_usd = float(free_qty * usd_px) if usd_px is not None else 0.0
@@ -630,38 +708,71 @@ def get_portfolio_balances(
     )
 
     per_symbol_budget: dict[str, float] = {}
-    per_symbol_allocated: dict[str, float] = {}
-    venue = cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock"
 
     for row in controls:
         if row.execution_mode != "sim":
             continue
         symbol_budget = per_symbol_budget.get(row.symbol, 0.0) + float(row.soft_risk_limit_usd)
         per_symbol_budget[row.symbol] = symbol_budget
-        per_symbol_allocated[row.symbol] = per_symbol_allocated.get(row.symbol, 0.0) + float(
-            repo.current_open_risk_usd(
-                symbol=row.symbol,
-                venue=venue,
-                timeframe=row.timeframe,
-                execution_mode="sim",
-            )
-        )
+
+    realized_by_symbol = repo.realized_net_pnl_by_symbol(execution_mode="sim")
+    open_positions = repo.list_open_positions(execution_mode="sim")
+    open_long_notional_by_symbol: dict[str, float] = {}
+    open_short_notional_by_symbol: dict[str, float] = {}
+    unrealized_by_symbol: dict[str, float] = {}
+    for item in open_positions:
+        mark_price = float(item.last_price) if item.last_price is not None else float(item.entry_price)
+        qty = float(item.qty)
+        notional = abs(mark_price * qty)
+        if item.trade_side == "short":
+            open_short_notional_by_symbol[item.symbol] = open_short_notional_by_symbol.get(item.symbol, 0.0) + notional
+        else:
+            open_long_notional_by_symbol[item.symbol] = open_long_notional_by_symbol.get(item.symbol, 0.0) + notional
+
+        if item.trade_side == "short":
+            gross = (float(item.entry_price) - mark_price) * qty
+        else:
+            gross = (mark_price - float(item.entry_price)) * qty
+        unrealized_net = float(gross) - float(item.entry_fee)
+        unrealized_by_symbol[item.symbol] = unrealized_by_symbol.get(item.symbol, 0.0) + unrealized_net
+
+    wallet_adjustments = {row.symbol: row for row in repo.list_sim_wallet_balances()}
 
     cash_value = 0.0
     asset_value = 0.0
     rows: list[PortfolioBalanceAssetOut] = []
-    for symbol in sorted(per_symbol_budget.keys()):
+    symbols = sorted(
+        set(cfg.symbols)
+        | set(per_symbol_budget.keys())
+        | set(realized_by_symbol.keys())
+        | set(open_long_notional_by_symbol.keys())
+        | set(open_short_notional_by_symbol.keys())
+        | set(wallet_adjustments.keys())
+    )
+    for symbol in symbols:
         budget = float(max(per_symbol_budget.get(symbol, 0.0), 0.0))
-        allocated = float(max(min(per_symbol_allocated.get(symbol, 0.0), budget), 0.0))
-        available = float(max(budget - allocated, 0.0))
+        realized = float(realized_by_symbol.get(symbol, 0.0))
+        unrealized = float(unrealized_by_symbol.get(symbol, 0.0))
+        open_long_notional = float(open_long_notional_by_symbol.get(symbol, 0.0))
+        open_short_notional = float(open_short_notional_by_symbol.get(symbol, 0.0))
+        wallet_row = wallet_adjustments.get(symbol)
+        cash_adjustment = float(wallet_row.cash_adjustment_usd) if wallet_row is not None else 0.0
+        asset_adjustment = float(wallet_row.asset_adjustment_usd) if wallet_row is not None else 0.0
+
+        equity = max(budget + realized + unrealized, 0.0)
+        baseline_asset = equity * 0.5
+        baseline_cash = equity * 0.5
+        available = max(baseline_cash - open_long_notional + open_short_notional + cash_adjustment, 0.0)
+        asset_leg = max(baseline_asset + open_long_notional - open_short_notional + asset_adjustment, 0.0)
+
         cash_value += available
-        asset_value += allocated
+        asset_value += asset_leg
         rows.append(
             PortfolioBalanceAssetOut(
                 asset=symbol,
                 free=float(available),
                 usd_price=1.0,
-                value_usd=float(budget),
+                value_usd=float(available + asset_leg),
             )
         )
 
@@ -676,8 +787,38 @@ def get_portfolio_balances(
         asset_value_usd=float(asset_value),
         cash_ratio=float(cash_ratio),
         asset_ratio=float(asset_ratio),
-        note="Sim balances are derived from control-plane soft risk budgets and current open risk usage.",
+        note=(
+            "Sim balances are trade-aware and side-aware: long entries consume cash, short entries consume asset inventory; "
+            "manual SIM wallet adjustments are included per symbol."
+        ),
         assets=rows,
+    )
+
+
+@router.post("/control-plane/assets/{symbol:path}/sim-wallet/augment", response_model=SimWalletAugmentOut)
+def augment_sim_wallet_balance(
+    symbol: str,
+    payload: SimWalletAugmentRequest,
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
+    cfg = get_config()
+    if symbol not in cfg.symbols:
+        raise HTTPException(status_code=422, detail=f"Unknown symbol: {symbol}")
+
+    bucket = (payload.bucket or "").strip().lower()
+    if bucket not in {"cash", "asset"}:
+        raise HTTPException(status_code=422, detail="bucket must be one of: cash, asset")
+
+    amount = float(payload.amount_usd)
+    row = repo.augment_sim_wallet_balance(symbol=symbol, bucket=bucket, amount_usd=amount)
+    return SimWalletAugmentOut(
+        symbol=symbol,
+        bucket=bucket,
+        amount_usd=amount,
+        cash_adjustment_usd=float(row.cash_adjustment_usd),
+        asset_adjustment_usd=float(row.asset_adjustment_usd),
+        note="SIM wallet balance updated",
     )
 
 
@@ -981,6 +1122,62 @@ def get_risk_policy_settings(_auth: None = Depends(require_write_access)):
     return RiskPolicyOut(
         risk_budget_policy=cfg.trading.risk_budget_policy,
         portfolio_soft_risk_limit_usd=float(cfg.trading.portfolio_soft_risk_limit_usd),
+    )
+
+
+@router.get("/control-plane/live-readiness", response_model=LiveReadinessOut)
+def get_live_readiness(_auth: None = Depends(require_write_access)):
+    cfg = get_config()
+    runtimes = _runtime_configs(cfg)
+
+    real_adapter_enabled_any = any(rt.execution_adapter == "real" for rt in runtimes)
+    live_order_enabled_any = any(rt.execution_adapter == "real" and bool(rt.live_trading_enabled) for rt in runtimes)
+    live_ack_required_any = any(rt.execution_adapter == "real" and bool(rt.live_require_explicit_env_ack) for rt in runtimes)
+    live_ack_satisfied_any = True
+    for rt in runtimes:
+        if rt.execution_adapter != "real" or not bool(rt.live_require_explicit_env_ack):
+            continue
+        env_val = os.getenv(rt.live_ack_env_var_name, "")
+        if env_val != rt.live_ack_env_var_value:
+            live_ack_satisfied_any = False
+            break
+
+    api_key_present = bool(cfg.providers.ccxt.api_key)
+    api_secret_present = bool(cfg.providers.ccxt.api_secret)
+
+    balance_readable = False
+    balance_error = None
+    try:
+        exchange = _build_readonly_exchange(cfg)
+        exchange.fetch_balance()
+        balance_readable = True
+    except Exception as exc:  # noqa: BLE001
+        balance_error = str(exc)
+
+    note = None
+    if not api_key_present or not api_secret_present:
+        note = "Exchange API credentials missing in environment."
+    elif not balance_readable:
+        note = "Credentials found but exchange balance query failed."
+    elif real_adapter_enabled_any and not live_order_enabled_any:
+        note = "Readiness is good for balance checks; live order routing is still disabled by config."
+    elif not real_adapter_enabled_any:
+        note = "Balance checks are available; no runtime is currently configured for real execution."
+    else:
+        note = "Live readiness checks passed."
+
+    return LiveReadinessOut(
+        venue=cfg.providers.ccxt.venue,
+        sandbox=bool(cfg.providers.ccxt.sandbox),
+        api_key_present=api_key_present,
+        api_secret_present=api_secret_present,
+        real_adapter_enabled_any=real_adapter_enabled_any,
+        live_order_enabled_any=live_order_enabled_any,
+        live_ack_required_any=live_ack_required_any,
+        live_ack_satisfied_any=live_ack_satisfied_any,
+        balance_readable=balance_readable,
+        balance_error=balance_error,
+        note=note,
     )
 
 

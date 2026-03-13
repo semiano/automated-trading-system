@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, OpenPosition, PortfolioBalancesSnapshot, RiskPolicySettings } from "./types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot, RiskPolicySettings, SimWalletAugmentResponse } from "./types";
 
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -286,4 +286,36 @@ export async function fetchPortfolioBalances(args: { mode: "sim" | "live" }): Pr
     throw new Error(`Failed to fetch portfolio balances: ${detail}`);
   }
   return (await response.json()) as PortfolioBalancesSnapshot;
+}
+
+export async function augmentSimWalletBalance(args: {
+  symbol: string;
+  bucket: "cash" | "asset";
+  amount_usd: number;
+}): Promise<SimWalletAugmentResponse> {
+  const response = await fetch(
+    `${BASE}/control-plane/assets/${encodeURIComponent(args.symbol)}/sim-wallet/augment`,
+    withApiKey("write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bucket: args.bucket,
+        amount_usd: args.amount_usd,
+      }),
+    })
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to augment sim wallet: ${detail}`);
+  }
+  return (await response.json()) as SimWalletAugmentResponse;
+}
+
+export async function fetchLiveReadiness(): Promise<LiveReadiness> {
+  const response = await fetch(`${BASE}/control-plane/live-readiness`, withApiKey("write"));
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to fetch live readiness: ${detail}`);
+  }
+  return (await response.json()) as LiveReadiness;
 }

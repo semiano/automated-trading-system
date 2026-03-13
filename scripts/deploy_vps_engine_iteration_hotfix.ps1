@@ -106,6 +106,11 @@ $files = @(
 
 $readToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_READ_TOKEN"
 $writeToken = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_API_WRITE_TOKEN"
+${exchangeApiKey} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_API_KEY"
+${exchangeApiSecret} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_API_SECRET"
+${exchangeApiPassword} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_API_PASSWORD"
+${exchangeSandbox} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_SANDBOX"
+${liveAck} = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_ENABLE_LIVE_TRADING"
 if ($readToken) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_READ_TOKEN" -Value $readToken
     Set-EnvValueInFile -Path $envDockerPath -Key "VITE_API_READ_TOKEN" -Value $readToken
@@ -113,6 +118,21 @@ if ($readToken) {
 if ($writeToken) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_WRITE_TOKEN" -Value $writeToken
     Set-EnvValueInFile -Path $envDockerPath -Key "VITE_API_WRITE_TOKEN" -Value $writeToken
+}
+if ($exchangeApiKey) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "EXCHANGE_API_KEY" -Value $exchangeApiKey
+}
+if ($exchangeApiSecret) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "EXCHANGE_API_SECRET" -Value $exchangeApiSecret
+}
+if ($exchangeApiPassword) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "EXCHANGE_API_PASSWORD" -Value $exchangeApiPassword
+}
+if ($exchangeSandbox) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "EXCHANGE_SANDBOX" -Value $exchangeSandbox
+}
+if ($liveAck) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_ENABLE_LIVE_TRADING" -Value $liveAck
 }
 
 Write-Host "Uploading .env.docker to $ip ..."

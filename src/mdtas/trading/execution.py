@@ -54,6 +54,7 @@ class Fill:
     qty: float
     notional_usd: float
     fee_usd: float
+    spot_price: float | None = None
 
 
 class ExecutionAdapter(Protocol):
@@ -98,7 +99,14 @@ class PaperExecutionAdapter:
         price = apply_price_tick(price, side=side, tick=constraints.price_tick)
         notional = float(price) * float(qty)
         fee = notional * (float(constraints.fee_bps) / 10000.0)
-        return Fill(side=side, price=float(price), qty=float(qty), notional_usd=float(notional), fee_usd=float(fee))
+        return Fill(
+            side=side,
+            price=float(price),
+            qty=float(qty),
+            notional_usd=float(notional),
+            fee_usd=float(fee),
+            spot_price=float(raw_price),
+        )
 
     def submit_exit(
         self,
@@ -114,7 +122,14 @@ class PaperExecutionAdapter:
         price = apply_price_tick(price, side=side, tick=constraints.price_tick)
         notional = float(price) * float(qty)
         fee = notional * (float(constraints.fee_bps) / 10000.0)
-        return Fill(side=side, price=float(price), qty=float(qty), notional_usd=float(notional), fee_usd=float(fee))
+        return Fill(
+            side=side,
+            price=float(price),
+            qty=float(qty),
+            notional_usd=float(notional),
+            fee_usd=float(fee),
+            spot_price=float(raw_price),
+        )
 
 
 class CcxtExecutionAdapter:
@@ -231,6 +246,28 @@ class CcxtExecutionAdapter:
         return order
 
     @staticmethod
+    def _ticker_price(ticker: dict) -> float | None:
+        for key in ("last", "close", "bid", "ask"):
+            value = ticker.get(key)
+            if value is None:
+                continue
+            px = float(value)
+            if px > 0:
+                return px
+        return None
+
+    def _spot_price_for_order(self, *, symbol: str, fallback_price: float) -> float:
+        try:
+            ticker = self.exchange.fetch_ticker(symbol)
+            if isinstance(ticker, dict):
+                px = self._ticker_price(ticker)
+                if px is not None and px > 0:
+                    return float(px)
+        except Exception:  # noqa: BLE001
+            pass
+        return float(fallback_price)
+
+    @staticmethod
     def _extract_fee(order: dict) -> float:
         fee_obj = order.get("fee")
         if isinstance(fee_obj, dict) and fee_obj.get("cost") is not None:
@@ -268,10 +305,11 @@ class CcxtExecutionAdapter:
         trade_side: PositionSide,
         constraints: SymbolExecutionConstraints,
     ) -> Fill:
-        self._validate_request(symbol=symbol, raw_price=raw_price, qty=qty, trade_side=trade_side)
+        spot_price = self._spot_price_for_order(symbol=symbol, fallback_price=raw_price)
+        self._validate_request(symbol=symbol, raw_price=spot_price, qty=qty, trade_side=trade_side)
         side: TradeActionSide = "buy" if trade_side == "long" else "sell"
-        order = self._submit_market_order(symbol=symbol, side=side, qty=qty, raw_price=raw_price)
-        fill = self._extract_fill(order, side=side, fallback_price=raw_price, fallback_qty=qty)
+        order = self._submit_market_order(symbol=symbol, side=side, qty=qty, raw_price=spot_price)
+        fill = self._extract_fill(order, side=side, fallback_price=spot_price, fallback_qty=qty)
         logger.warning(
             "LIVE ENTRY %s %s side=%s qty=%.8f price=%.8f notional=%.8f fee=%.8f",
             self.venue,
@@ -282,7 +320,14 @@ class CcxtExecutionAdapter:
             fill.notional_usd,
             fill.fee_usd,
         )
-        return fill
+        return Fill(
+            side=fill.side,
+            price=fill.price,
+            qty=fill.qty,
+            notional_usd=fill.notional_usd,
+            fee_usd=fill.fee_usd,
+            spot_price=float(spot_price),
+        )
 
     def submit_exit(
         self,
@@ -293,10 +338,11 @@ class CcxtExecutionAdapter:
         trade_side: PositionSide,
         constraints: SymbolExecutionConstraints,
     ) -> Fill:
-        self._validate_request(symbol=symbol, raw_price=raw_price, qty=qty, trade_side=trade_side)
+        spot_price = self._spot_price_for_order(symbol=symbol, fallback_price=raw_price)
+        self._validate_request(symbol=symbol, raw_price=spot_price, qty=qty, trade_side=trade_side)
         side: TradeActionSide = "sell" if trade_side == "long" else "buy"
-        order = self._submit_market_order(symbol=symbol, side=side, qty=qty, raw_price=raw_price)
-        fill = self._extract_fill(order, side=side, fallback_price=raw_price, fallback_qty=qty)
+        order = self._submit_market_order(symbol=symbol, side=side, qty=qty, raw_price=spot_price)
+        fill = self._extract_fill(order, side=side, fallback_price=spot_price, fallback_qty=qty)
         logger.warning(
             "LIVE EXIT %s %s side=%s qty=%.8f price=%.8f notional=%.8f fee=%.8f",
             self.venue,
@@ -307,7 +353,14 @@ class CcxtExecutionAdapter:
             fill.notional_usd,
             fill.fee_usd,
         )
-        return fill
+        return Fill(
+            side=fill.side,
+            price=fill.price,
+            qty=fill.qty,
+            notional_usd=fill.notional_usd,
+            fee_usd=fill.fee_usd,
+            spot_price=float(spot_price),
+        )
 
 
 def gap_aware_raw_exit_price(
