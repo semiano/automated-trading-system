@@ -362,6 +362,10 @@ export default function App() {
     amount_usd: number;
   }) => {
     await augmentSimWalletBalance(payload);
+    await Promise.all([
+      refreshAssetControls(),
+      fetchPortfolioBalances({ mode: pnlMode }).then(setPortfolioBalances).catch(() => setPortfolioBalances(null)),
+    ]);
   };
 
   const saveAssetTuning = async (payload: {

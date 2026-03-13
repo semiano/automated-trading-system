@@ -21,6 +21,7 @@ from mdtas.trading.execution import (
     gap_aware_raw_exit_price,
 )
 from mdtas.trading.runtime import compute_entry_sizing, evaluate_entry_guards
+from mdtas.trading.sizing_policy import compute_discretionary_trade_notional
 from mdtas.utils.timeframes import timeframe_to_timedelta
 
 logger = logging.getLogger(__name__)
@@ -409,6 +410,31 @@ class Simple5mRuntime:
         cash_available = max(baseline_cash - open_long_notional + open_short_notional + cash_adjustment, 0.0)
         return float(cash_available), float(asset_available)
 
+    def _live_wallet_available_usd(self, *, symbol: str, trade_side: str, reference_price: float, fallback_usd: float) -> float:
+        if hasattr(self.execution, "available_notional_usd"):
+            try:
+                available = self.execution.available_notional_usd(
+                    symbol=symbol,
+                    trade_side=trade_side,
+                    reference_price=reference_price,
+                )
+                return max(float(available), 0.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("5m live wallet availability fallback for %s: %s", symbol, exc)
+        return max(float(fallback_usd), 0.0)
+
+    def _reaffirm_live_balance_reason(self, *, symbol: str, reference_price: float) -> str:
+        if hasattr(self.execution, "reaffirm_symbol_balances"):
+            try:
+                snap = self.execution.reaffirm_symbol_balances(symbol=symbol, reference_price=reference_price)
+                return (
+                    f"post_trade_quote_usd={float(snap.get('quote_value_usd', 0.0)):.4f}"
+                    f";post_trade_base_usd={float(snap.get('base_value_usd', 0.0)):.4f}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                return f"post_trade_balance_unavailable={exc}"
+        return "post_trade_balance_unavailable=adapter"
+
     def evaluate_symbol(self, symbol: str, venue: str) -> None:
         cfg = self.cfg.trading_5m
         if not cfg.enabled:
@@ -535,27 +561,14 @@ class Simple5mRuntime:
                 self._emit_decision(symbol, timeframe, ts, "hold", [guard.blocked_reason], tuning_version=tuning_version)
                 return
 
-            sizing = compute_entry_sizing(
-                sizing_mode="fixed_notional",
-                position_size_usd=float(cfg.position_size_usd) * self._htf_rsi_multiplier(symbol=symbol, venue=venue, trade_side=chosen_side),
-                risk_per_trade_usd=0.0,
-                max_position_notional_usd=cfg.max_position_notional_usd,
-                raw_entry_price=float(bar["open"]),
-                atr=float(prev["atr"]),
-                stop_atr=float(params.stop_atr),
-                qty_step=max(float(constraints.qty_step), 0.0001),
-            )
-            if sizing.qty_final <= 0:
-                return
-
-            planned_entry_notional = float(bar["open"]) * float(sizing.qty_final)
             current_symbol_risk = self.trading_repo.current_open_risk_usd(
                 symbol=symbol,
                 venue=venue,
                 timeframe=timeframe,
                 execution_mode=execution_mode,
             )
-            available_actual_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            soft_risk_remaining_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            available_actual_usd = soft_risk_remaining_usd
             if execution_mode == "sim":
                 sim_cash_usd, sim_asset_usd = self._sim_wallet_available_usd(
                     symbol=symbol,
@@ -565,7 +578,36 @@ class Simple5mRuntime:
                 )
                 available_actual_usd = sim_cash_usd if chosen_side == "long" else sim_asset_usd
             balance_bucket = "cash" if chosen_side == "long" else "asset"
-            if execution_mode == "sim" and planned_entry_notional > available_actual_usd:
+            if execution_mode == "live":
+                available_actual_usd = self._live_wallet_available_usd(
+                    symbol=symbol,
+                    trade_side=chosen_side,
+                    reference_price=float(bar["open"]),
+                    fallback_usd=soft_risk_remaining_usd,
+                )
+
+            trade_max_usd = min(soft_risk_remaining_usd, max(available_actual_usd, 0.0))
+            edge_ratio = min(max((abs(bb_dev) - params.bb_entry_deviation) / max(params.bb_entry_deviation, 1e-9), 0.0), 1.0)
+            target_notional_usd, discretion_fraction = compute_discretionary_trade_notional(
+                max_trade_usd=trade_max_usd,
+                discretion_fraction=0.5 + 0.5 * edge_ratio,
+            )
+
+            sizing = compute_entry_sizing(
+                sizing_mode="fixed_notional",
+                position_size_usd=target_notional_usd,
+                risk_per_trade_usd=0.0,
+                max_position_notional_usd=None,
+                raw_entry_price=float(bar["open"]),
+                atr=float(prev["atr"]),
+                stop_atr=float(params.stop_atr),
+                qty_step=max(float(constraints.qty_step), 0.0001),
+            )
+            if sizing.qty_final <= 0:
+                return
+
+            planned_entry_notional = float(bar["open"]) * float(sizing.qty_final)
+            if planned_entry_notional > available_actual_usd:
                 self._emit_decision(
                     symbol,
                     timeframe,
@@ -575,20 +617,11 @@ class Simple5mRuntime:
                         "actual_balance_blocked",
                         f"side={chosen_side}",
                         f"bucket={balance_bucket}",
+                        f"trade_max={trade_max_usd:.4f}",
+                        f"target={target_notional_usd:.4f}",
                         f"required={planned_entry_notional:.4f}",
                         f"available={available_actual_usd:.4f}",
                     ],
-                    tuning_version=tuning_version,
-                )
-                return
-
-            if cfg.max_position_notional_usd is not None and cfg.max_position_notional_usd > 0 and planned_entry_notional > cfg.max_position_notional_usd:
-                self._emit_decision(
-                    symbol,
-                    timeframe,
-                    ts,
-                    "hold",
-                    ["max_notional_blocked", f"notional={planned_entry_notional:.4f}", f"max={float(cfg.max_position_notional_usd):.4f}"],
                     tuning_version=tuning_version,
                 )
                 return
@@ -637,18 +670,27 @@ class Simple5mRuntime:
                 take_profit_price=take_profit_price,
                 last_price=float(bar["close"]),
             )
+            reaffirm_reason = ""
+            if execution_mode == "live":
+                reaffirm_reason = self._reaffirm_live_balance_reason(symbol=symbol, reference_price=float(entry_fill.price))
+            entry_reasons = [
+                f"bb_dev={bb_dev:.3f}",
+                f"flatten_ratio={flatten_ratio:.3f}",
+                f"balance_bucket={balance_bucket}",
+                f"trade_max={trade_max_usd:.4f}",
+                f"target={target_notional_usd:.4f}",
+                f"discretion={discretion_fraction:.4f}",
+                f"required={planned_entry_notional:.4f}",
+                f"available={available_actual_usd:.4f}",
+            ]
+            if reaffirm_reason:
+                entry_reasons.append(reaffirm_reason)
             self._emit_decision(
                 symbol,
                 timeframe,
                 ts,
                 "enter_long" if chosen_side == "long" else "enter_short",
-                [
-                    f"bb_dev={bb_dev:.3f}",
-                    f"flatten_ratio={flatten_ratio:.3f}",
-                    f"balance_bucket={balance_bucket}",
-                    f"required={planned_entry_notional:.4f}",
-                    f"available={available_actual_usd:.4f}",
-                ],
+                entry_reasons,
                 tuning_version=tuning_version,
             )
             return
@@ -716,4 +758,7 @@ class Simple5mRuntime:
             exit_fee=float(exit_fill.fee_usd),
             hold_bars_at_exit=hold_bars,
         )
-        self._emit_decision(symbol, timeframe, ts, "exit", [exit_reason], tuning_version=tuning_version)
+        reasons = [exit_reason]
+        if execution_mode == "live":
+            reasons.append(self._reaffirm_live_balance_reason(symbol=symbol, reference_price=float(exit_fill.price)))
+        self._emit_decision(symbol, timeframe, ts, "exit", reasons, tuning_version=tuning_version)

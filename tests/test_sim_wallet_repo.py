@@ -9,10 +9,11 @@ def test_sim_wallet_augment_and_list():
 
     symbol = "XRP/USD"
     repo.augment_sim_wallet_balance(symbol=symbol, bucket="cash", amount_usd=25.0)
+    repo.augment_sim_wallet_balance(symbol=symbol, bucket="cash", amount_usd=30.0)
     row = repo.augment_sim_wallet_balance(symbol=symbol, bucket="asset", amount_usd=40.0)
 
-    assert float(row.cash_adjustment_usd) >= 25.0
-    assert float(row.asset_adjustment_usd) >= 40.0
+    assert float(row.cash_adjustment_usd) == 30.0
+    assert float(row.asset_adjustment_usd) == 40.0
 
     rows = repo.list_sim_wallet_balances()
     assert any(r.symbol == symbol for r in rows)

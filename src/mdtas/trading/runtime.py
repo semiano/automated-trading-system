@@ -22,6 +22,7 @@ from mdtas.trading.execution import (
     round_down_to_step,
 )
 from mdtas.trading.regime import compute_htf_regime
+from mdtas.trading.sizing_policy import compute_discretionary_trade_notional
 from mdtas.utils.timeframes import timeframe_to_timedelta
 
 logger = logging.getLogger(__name__)
@@ -467,6 +468,32 @@ class TradingRuntime:
         cash_available = max(baseline_cash - open_long_notional + open_short_notional + cash_adjustment, 0.0)
         return float(cash_available), float(asset_available)
 
+    def _live_wallet_available_usd(self, *, symbol: str, trade_side: str, reference_price: float, fallback_usd: float) -> float:
+        if hasattr(self.execution, "available_notional_usd"):
+            try:
+                available = self.execution.available_notional_usd(
+                    symbol=symbol,
+                    trade_side=trade_side,
+                    reference_price=reference_price,
+                )
+                return max(float(available), 0.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Live wallet availability fallback for %s: %s", symbol, exc)
+        return max(float(fallback_usd), 0.0)
+
+    def _reaffirm_live_balance_note(self, *, symbol: str, reference_price: float) -> str:
+        if hasattr(self.execution, "reaffirm_symbol_balances"):
+            try:
+                snap = self.execution.reaffirm_symbol_balances(symbol=symbol, reference_price=reference_price)
+                return (
+                    "post_trade_balance"
+                    f" quote_usd={float(snap.get('quote_value_usd', 0.0)):.4f}"
+                    f" base_usd={float(snap.get('base_value_usd', 0.0)):.4f}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                return f"post_trade_balance_unavailable={exc}"
+        return "post_trade_balance_unavailable=adapter"
+
     def _htf_rsi_multiplier(self, *, symbol: str, venue: str, trade_side: str, fallback_rsi: float | None) -> float:
         cfg = self.cfg.trading
 
@@ -862,59 +889,14 @@ class TradingRuntime:
                 trade_side=chosen_side,
                 fallback_rsi=fallback_rsi,
             )
-
-            sizing_result = compute_entry_sizing(
-                sizing_mode=self.cfg.trading.sizing_mode,
-                position_size_usd=float(self.cfg.trading.position_size_usd) * size_multiplier,
-                risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd) * size_multiplier,
-                max_position_notional_usd=self.cfg.trading.max_position_notional_usd,
-                raw_entry_price=raw_entry_price,
-                atr=atr_for_sizing,
-                stop_atr=float(params.stop_atr),
-                qty_step=float(constraints.qty_step),
-            )
-            qty = sizing_result.qty_final
-            if sizing_result.sizing_reason is not None:
-                self.trading_repo.set_asset_state(
-                    symbol=symbol,
-            timeframe=timeframe,
-            default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="sizing_invalid",
-                    note=(
-                        f"mode={self.cfg.trading.sizing_mode}, reason={sizing_result.sizing_reason}, "
-                        f"atr={atr_for_sizing}, stop_distance={sizing_result.stop_distance}, "
-                        f"qty_raw={sizing_result.qty_raw:.8f}, qty_final={sizing_result.qty_final:.8f}"
-                    ),
-                    log_event=True,
-                )
-                self._emit_decision_log(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    ts=decision_ts,
-                    decision="hold",
-                    reasons=["sizing_invalid", f"reason={sizing_result.sizing_reason}"],
-                    sizing_mode=self.cfg.trading.sizing_mode,
-                    risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
-                    stop_distance=sizing_result.stop_distance,
-                    qty_raw=sizing_result.qty_raw,
-                    qty_final=sizing_result.qty_final,
-                    notional=None,
-                    htf_timeframe=htf_timeframe,
-                    trend_state=regime.get("trend_state"),
-                    chop_state=regime.get("chop_state"),
-                    bb_width_norm=regime.get("bb_width_norm"),
-                    atr_pct=regime.get("atr_pct"),
-                )
-                return
-
-            planned_entry_notional = float(raw_entry_price) * float(qty)
             current_symbol_risk = self.trading_repo.current_open_risk_usd(
                 symbol=symbol,
                 venue=venue,
                 timeframe=timeframe,
                 execution_mode=execution_mode,
             )
-            available_actual_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            soft_risk_remaining_usd = max(float(control.soft_risk_limit_usd) - float(current_symbol_risk), 0.0)
+            available_actual_usd = soft_risk_remaining_usd
             if execution_mode == "sim":
                 sim_cash_usd, sim_asset_usd = self._sim_wallet_available_usd(
                     symbol=symbol,
@@ -924,15 +906,29 @@ class TradingRuntime:
                 )
                 available_actual_usd = sim_cash_usd if chosen_side == "long" else sim_asset_usd
             balance_bucket = "cash" if chosen_side == "long" else "asset"
-            if execution_mode == "sim" and planned_entry_notional > available_actual_usd:
+            if execution_mode == "live":
+                available_actual_usd = self._live_wallet_available_usd(
+                    symbol=symbol,
+                    trade_side=chosen_side,
+                    reference_price=raw_entry_price,
+                    fallback_usd=soft_risk_remaining_usd,
+                )
+
+            trade_max_usd = min(soft_risk_remaining_usd, max(available_actual_usd, 0.0))
+            discretion_fraction = 0.5 + 0.5 * min(max((size_multiplier - 0.65) / 0.5, 0.0), 1.0)
+            target_notional_usd, chosen_fraction = compute_discretionary_trade_notional(
+                max_trade_usd=trade_max_usd,
+                discretion_fraction=discretion_fraction,
+            )
+            if target_notional_usd <= 0:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
                     timeframe=timeframe,
                     default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
                     state="actual_balance_blocked",
                     note=(
-                        f"side={chosen_side}, bucket={balance_bucket}, required_notional={planned_entry_notional:.4f} > available_actual={available_actual_usd:.4f}; "
-                        f"symbol_limit={float(control.soft_risk_limit_usd):.4f}, current_open_risk={float(current_symbol_risk):.4f}"
+                        f"side={chosen_side}, bucket={balance_bucket}, trade_max=0.0000; "
+                        f"soft_remaining={soft_risk_remaining_usd:.4f}, available_actual={available_actual_usd:.4f}"
                     ),
                     log_event=True,
                 )
@@ -944,7 +940,7 @@ class TradingRuntime:
                     reasons=[
                         "actual_balance_blocked",
                         f"balance_bucket={balance_bucket}",
-                        f"required_notional={planned_entry_notional:.4f}",
+                        "required_notional=0.0000",
                         f"available_actual={available_actual_usd:.4f}",
                     ],
                     sizing_mode=self.cfg.trading.sizing_mode,
@@ -961,16 +957,27 @@ class TradingRuntime:
                 )
                 return
 
-            max_position_notional = self.cfg.trading.max_position_notional_usd
-            if max_position_notional is not None and max_position_notional > 0 and planned_entry_notional > max_position_notional:
+            sizing_result = compute_entry_sizing(
+                sizing_mode="fixed_notional",
+                position_size_usd=target_notional_usd,
+                risk_per_trade_usd=0.0,
+                max_position_notional_usd=None,
+                raw_entry_price=raw_entry_price,
+                atr=atr_for_sizing,
+                stop_atr=float(params.stop_atr),
+                qty_step=float(constraints.qty_step),
+            )
+            qty = sizing_result.qty_final
+            if sizing_result.sizing_reason is not None:
                 self.trading_repo.set_asset_state(
                     symbol=symbol,
                     timeframe=timeframe,
                     default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="max_notional_blocked",
+                    state="sizing_invalid",
                     note=(
-                        f"notional={planned_entry_notional:.4f} > max_position_notional={max_position_notional:.4f}; "
-                        f"mode={self.cfg.trading.sizing_mode}, qty_raw={sizing_result.qty_raw:.8f}, qty_final={qty:.8f}"
+                        f"mode=soft_risk_balance_discretion, reason={sizing_result.sizing_reason}, "
+                        f"trade_max={trade_max_usd:.4f}, target_notional={target_notional_usd:.4f}, discretion={chosen_fraction:.4f}, "
+                        f"qty_raw={sizing_result.qty_raw:.8f}, qty_final={qty:.8f}"
                     ),
                     log_event=True,
                 )
@@ -979,13 +986,13 @@ class TradingRuntime:
                     timeframe=timeframe,
                     ts=decision_ts,
                     decision="hold",
-                    reasons=["max_notional_blocked"],
+                    reasons=["sizing_invalid", f"reason={sizing_result.sizing_reason}"],
                     sizing_mode=self.cfg.trading.sizing_mode,
                     risk_per_trade_usd=float(self.cfg.trading.risk_per_trade_usd),
                     stop_distance=sizing_result.stop_distance,
                     qty_raw=sizing_result.qty_raw,
                     qty_final=qty,
-                    notional=planned_entry_notional,
+                    notional=target_notional_usd,
                     htf_timeframe=htf_timeframe,
                     trend_state=regime.get("trend_state"),
                     chop_state=regime.get("chop_state"),
@@ -993,6 +1000,8 @@ class TradingRuntime:
                     atr_pct=regime.get("atr_pct"),
                 )
                 return
+
+            planned_entry_notional = float(raw_entry_price) * float(qty)
 
             if constraints.min_notional_usd > 0 and planned_entry_notional < constraints.min_notional_usd:
                 self.trading_repo.set_asset_state(
@@ -1037,43 +1046,6 @@ class TradingRuntime:
                 planned_stop_price = float(raw_entry_price) - (params.stop_atr * atr)
                 projected_trade_risk = max(float(raw_entry_price) - planned_stop_price, 0.0) * float(qty)
             projected_trade_risk += planned_entry_notional * (float(constraints.fee_bps) / 10000.0)
-
-            current_risk, risk_limit = self._current_risk_and_limit(
-                symbol=symbol,
-                venue=venue,
-                timeframe=timeframe,
-                execution_mode=execution_mode,
-                per_symbol_limit=float(control.soft_risk_limit_usd),
-            )
-            if risk_limit > 0 and current_risk + projected_trade_risk > risk_limit:
-                self.trading_repo.set_asset_state(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
-                    state="risk_blocked",
-                    note=f"current={current_risk:.4f}, projected={projected_trade_risk:.4f}, limit={risk_limit:.4f}",
-                    log_event=True,
-                )
-                logger.warning(
-                    "Soft risk limit blocked entry for %s: current_risk=%.4f projected_trade_risk=%.4f soft_limit=%.4f",
-                    symbol,
-                    current_risk,
-                    projected_trade_risk,
-                    risk_limit,
-                )
-                self._emit_decision_log(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    ts=decision_ts,
-                    decision="hold",
-                    reasons=["risk_blocked"],
-                    htf_timeframe=htf_timeframe,
-                    trend_state=regime.get("trend_state"),
-                    chop_state=regime.get("chop_state"),
-                    bb_width_norm=regime.get("bb_width_norm"),
-                    atr_pct=regime.get("atr_pct"),
-                )
-                return
 
             try:
                 entry_fill = self.execution.submit_entry(
@@ -1140,6 +1112,9 @@ class TradingRuntime:
                 take_profit_price=take_profit_price,
                 last_price=float(bar["close"]),
             )
+            reaffirm_note = ""
+            if execution_mode == "live":
+                reaffirm_note = "; " + self._reaffirm_live_balance_note(symbol=symbol, reference_price=float(entry_fill.price))
             self.trading_repo.set_asset_state(
                 symbol=symbol,
             timeframe=timeframe,
@@ -1148,9 +1123,10 @@ class TradingRuntime:
                 note=(
                     f"mode={execution_mode}, side={chosen_side}, fill={entry_fill.price:.6f}, "
                     f"qty={entry_fill.qty:.6f}, fee={entry_fill.fee_usd:.6f}, notional={entry_notional:.6f}, "
-                    f"balance_bucket={balance_bucket}, required_notional={planned_entry_notional:.4f}, available_actual={available_actual_usd:.4f}, "
-                    f"sizing_mode={self.cfg.trading.sizing_mode}, risk_per_trade={self.cfg.trading.risk_per_trade_usd:.4f}, "
+                    f"balance_bucket={balance_bucket}, trade_max={trade_max_usd:.4f}, target_notional={target_notional_usd:.4f}, available_actual={available_actual_usd:.4f}, "
+                    f"discretion={chosen_fraction:.4f}, sizing_mode=soft_risk_balance_discretion, risk_per_trade={projected_trade_risk:.4f}, "
                     f"stop_distance={sizing_result.stop_distance}, qty_raw={sizing_result.qty_raw:.8f}; {chosen_note}"
+                    f"{reaffirm_note}"
                 ),
                 log_event=True,
             )
@@ -1171,6 +1147,9 @@ class TradingRuntime:
                 reasons=[
                     chosen_note,
                     f"balance_bucket={balance_bucket}",
+                    f"trade_max={trade_max_usd:.4f}",
+                    f"target_notional={target_notional_usd:.4f}",
+                    f"discretion={chosen_fraction:.4f}",
                     f"required_notional={planned_entry_notional:.4f}",
                     f"available_actual={available_actual_usd:.4f}",
                 ],
@@ -1500,12 +1479,16 @@ class TradingRuntime:
             exit_fee=exit_fill.fee_usd,
             hold_bars_at_exit=hold_bars,
         )
+        reaffirm_note = ""
+        execution_mode = getattr(trade, "execution_mode", getattr(position, "execution_mode", "sim"))
+        if execution_mode == "live":
+            reaffirm_note = ", " + self._reaffirm_live_balance_note(symbol=trade.symbol, reference_price=float(exit_fill.price))
         self.trading_repo.set_asset_state(
             symbol=trade.symbol,
             timeframe=trade.timeframe,
             default_soft_risk_limit_usd=self.cfg.trading.soft_portfolio_risk_limit_usd,
             state="position_closed",
-            note=f"reason={reason}, side={trade.trade_side}, fill={exit_fill.price:.6f}, net_pnl={trade.net_pnl:.6f}",
+            note=f"reason={reason}, side={trade.trade_side}, fill={exit_fill.price:.6f}, net_pnl={trade.net_pnl:.6f}{reaffirm_note}",
             log_event=True,
         )
         logger.info(

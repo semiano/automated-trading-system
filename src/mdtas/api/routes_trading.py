@@ -818,7 +818,7 @@ def augment_sim_wallet_balance(
         amount_usd=amount,
         cash_adjustment_usd=float(row.cash_adjustment_usd),
         asset_adjustment_usd=float(row.asset_adjustment_usd),
-        note="SIM wallet balance updated",
+        note="SIM wallet adjustment set",
     )
 
 

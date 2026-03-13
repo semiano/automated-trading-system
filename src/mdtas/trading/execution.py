@@ -212,6 +212,40 @@ class CcxtExecutionAdapter:
                     f"required_{base_ccy}>={required_base:.8f}"
                 )
 
+    def available_notional_usd(self, *, symbol: str, trade_side: PositionSide, reference_price: float) -> float:
+        if not hasattr(self.exchange, "fetch_balance"):
+            return 0.0
+        base_ccy, quote_ccy = self._split_symbol(symbol)
+        balance = self.exchange.fetch_balance()
+        base_free = float((balance.get(base_ccy) or {}).get("free") or 0.0)
+        quote_free = float((balance.get(quote_ccy) or {}).get("free") or 0.0)
+        if trade_side == "long":
+            return max(quote_free, 0.0)
+        px = self._spot_price_for_order(symbol=symbol, fallback_price=reference_price)
+        return max(base_free * float(px), 0.0)
+
+    def reaffirm_symbol_balances(self, *, symbol: str, reference_price: float) -> dict[str, float]:
+        if not hasattr(self.exchange, "fetch_balance"):
+            return {
+                "base_free": 0.0,
+                "quote_free": 0.0,
+                "price": float(reference_price),
+                "base_value_usd": 0.0,
+                "quote_value_usd": 0.0,
+            }
+        base_ccy, quote_ccy = self._split_symbol(symbol)
+        balance = self.exchange.fetch_balance()
+        base_free = float((balance.get(base_ccy) or {}).get("free") or 0.0)
+        quote_free = float((balance.get(quote_ccy) or {}).get("free") or 0.0)
+        px = self._spot_price_for_order(symbol=symbol, fallback_price=reference_price)
+        return {
+            "base_free": base_free,
+            "quote_free": quote_free,
+            "price": float(px),
+            "base_value_usd": float(base_free * px),
+            "quote_value_usd": float(quote_free),
+        }
+
     def _validate_request(self, *, symbol: str, raw_price: float, qty: float, trade_side: PositionSide) -> None:
         if qty <= 0:
             raise ValueError("Order quantity must be > 0")

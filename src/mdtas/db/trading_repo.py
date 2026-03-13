@@ -517,11 +517,11 @@ class TradingRepository:
 
     def augment_sim_wallet_balance(self, *, symbol: str, bucket: str, amount_usd: float) -> SimWalletBalance:
         row = self.get_or_create_sim_wallet_balance(symbol)
-        delta = float(amount_usd)
+        target = float(amount_usd)
         if bucket == "cash":
-            row.cash_adjustment_usd = float(row.cash_adjustment_usd) + delta
+            row.cash_adjustment_usd = target
         elif bucket == "asset":
-            row.asset_adjustment_usd = float(row.asset_adjustment_usd) + delta
+            row.asset_adjustment_usd = target
         else:
             raise ValueError("bucket must be one of: cash, asset")
         self.session.commit()

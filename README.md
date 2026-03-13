@@ -118,6 +118,24 @@ trading:
   - `cooldown_bars_after_stop` for stop exits
   - `max_entries_per_hour` and `max_entries_per_day` rolling limits
 
+### SIM wallet controls
+
+- Portfolio "Set Balance" writes absolute SIM wallet adjustment values (not additive deltas).
+- You can set both `cash` and `asset` balance adjustments.
+- Asset row action sets the selected symbol's asset adjustment.
+- Cash row action supports selecting a symbol, then sets that symbol's cash adjustment.
+- Inputs are positive USD values.
+
+### Effective trade sizing policy
+
+- Runtime entry size now uses this max budget:
+  - `trade_max_usd = min(soft_risk_remaining_usd, actual_wallet_available_usd)`
+- A discretionary fraction is applied in the range `[0.5, 1.0]`:
+  - `target_notional_usd = trade_max_usd * discretion_fraction`
+- This keeps entries in the 50-100% band of the effective max trade budget and avoids very small notional entries when balance and soft risk permit larger size.
+- Decision logs include explicit dollars for visibility (`trade_max`, `target`, `required`, `available`).
+- In live execution mode, post-trade balance is reaffirmed and logged after entries and exits.
+
 ## Quickstart (mock mode)
 
 ### 1) Python environment

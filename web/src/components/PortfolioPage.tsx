@@ -117,7 +117,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
   const [tuningLoading, setTuningLoading] = useState(false);
   const [tuningSaving, setTuningSaving] = useState(false);
   const [rebalancingSymbol, setRebalancingSymbol] = useState<string | null>(null);
-  const [augmentingSymbol, setAugmentingSymbol] = useState<string | null>(null);
+  const [augmentingKey, setAugmentingKey] = useState<string | null>(null);
   const [filterSymbol, setFilterSymbol] = useState<string>("all");
   const [filterTimeframe, setFilterTimeframe] = useState<string>("all");
   const [filterSide, setFilterSide] = useState<string>("all");
@@ -761,33 +761,49 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         </span>
                       </td>
                       <td style={{ padding: 8 }}>
-                        {isSimBalances && row.rowType === "asset" ? (
+                        {isSimBalances ? (
                           <button
                             type="button"
-                            disabled={augmentingSymbol === row.symbol}
+                            disabled={augmentingKey === row.symbol}
                             onClick={async () => {
-                              const bucketInput = window.prompt(`Bucket for ${row.symbol}: cash or asset`, "asset");
-                              if (bucketInput == null) return;
-                              const parsedBucket = bucketInput.trim().toLowerCase();
-                              if (parsedBucket !== "cash" && parsedBucket !== "asset") {
-                                window.alert("Bucket must be cash or asset.");
+                              const controlsForMode = assetControls.filter((c) => c.execution_mode === balancesMode);
+                              const symbols = Array.from(new Set(controlsForMode.map((c) => c.symbol))).sort();
+                              if (symbols.length === 0) {
+                                window.alert("No symbols available for SIM wallet adjustment.");
                                 return;
                               }
-                              const bucket: "cash" | "asset" = parsedBucket;
-                              const input = window.prompt(`Augment ${row.symbol} ${bucket} balance by USD amount`, "100");
+
+                              const bucket: "cash" | "asset" = row.rowType === "cash" ? "cash" : "asset";
+                              const targetSymbol = row.rowType === "cash"
+                                ? (() => {
+                                    const symbolInput = window.prompt(`Symbol for cash adjustment (${symbols.join(", ")})`, symbols[0]);
+                                    if (symbolInput == null) return null;
+                                    const picked = symbolInput.trim().toUpperCase();
+                                    const matched = symbols.find((s) => s.toUpperCase() === picked);
+                                    if (!matched) {
+                                      window.alert("Select a valid symbol from the control plane list.");
+                                      return null;
+                                    }
+                                    return matched;
+                                  })()
+                                : row.symbol;
+                              if (!targetSymbol) return;
+
+                              const input = window.prompt(`Set ${targetSymbol} ${bucket} balance to absolute USD amount (positive)`, "100");
                               if (input == null) return;
                               const amount = Number(input);
                               if (!Number.isFinite(amount) || amount <= 0) {
                                 window.alert("Enter a positive USD amount.");
                                 return;
                               }
-                              setAugmentingSymbol(row.symbol);
+
+                              setAugmentingKey(row.symbol);
                               try {
-                                await onAugmentSimWallet({ symbol: row.symbol, bucket, amount_usd: amount });
+                                await onAugmentSimWallet({ symbol: targetSymbol, bucket, amount_usd: amount });
                               } catch (err) {
-                                window.alert(err instanceof Error ? err.message : "Failed to augment sim wallet");
+                                window.alert(err instanceof Error ? err.message : "Failed to set sim wallet balance");
                               } finally {
-                                setAugmentingSymbol(null);
+                                setAugmentingKey(null);
                               }
                             }}
                             style={{
@@ -796,10 +812,10 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                               color: "inherit",
                               borderRadius: 4,
                               padding: "3px 8px",
-                              cursor: augmentingSymbol === row.symbol ? "default" : "pointer",
+                              cursor: augmentingKey === row.symbol ? "default" : "pointer",
                             }}
                           >
-                            {augmentingSymbol === row.symbol ? "Augmenting..." : "Augment"}
+                            {augmentingKey === row.symbol ? "Saving..." : "Set Balance"}
                           </button>
                         ) : (
                           <span style={{ color: "#6b7280" }}>-</span>
