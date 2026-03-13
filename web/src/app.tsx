@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, augmentSimWalletBalance, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchLiveReadiness, fetchOpenPositions, fetchPortfolioBalances, fetchSymbols, updateAssetControl, updateAssetTuning, valueBalanceAsset } from "./api/client";
+import { API_BASE_URL, augmentSimWalletBalance, fetchAssetControls, fetchAssetTuningVersions, fetchCandles, fetchCatchupStatus, fetchClosedTrades, fetchGaps, fetchIndicators, fetchLiveReadiness, fetchOpenPositions, fetchPortfolioBalances, fetchSymbols, switchTradingMode, updateAssetControl, updateAssetTuning, valueBalanceAsset } from "./api/client";
 import type { AssetControl, AssetTuningVersion, CatchupStatusRow, ClosedTrade, Gap, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot } from "./api/types";
 import ChartLayout from "./components/ChartLayout";
 import HeaderBar from "./components/HeaderBar";
@@ -108,6 +108,7 @@ export default function App() {
   const [pnlMode, setPnlMode] = useState<"sim" | "live">("sim");
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [portfolioInfo, setPortfolioInfo] = useState<string | null>(null);
+  const [modeSwitching, setModeSwitching] = useState(false);
   const [portfolioBalances, setPortfolioBalances] = useState<PortfolioBalancesSnapshot | null>(null);
   const [liveReadiness, setLiveReadiness] = useState<LiveReadiness | null>(null);
   const [catchupRows, setCatchupRows] = useState<CatchupStatusRow[]>([]);
@@ -235,7 +236,7 @@ export default function App() {
     const loadPortfolio = async () => {
       const failed: string[] = [];
 
-      await fetchOpenPositions({ venue })
+      await fetchOpenPositions({ venue, execution_mode: pnlMode })
         .then(setOpenPositions)
         .catch(() => {
           setOpenPositions([]);
@@ -397,6 +398,35 @@ export default function App() {
     return fetchAssetTuningVersions(payload);
   };
 
+  const handleModeSwitch = async (targetMode: "sim" | "live") => {
+    if (targetMode === pnlMode || modeSwitching) return;
+
+    const warning = [
+      `Switch ${pnlMode.toUpperCase()} -> ${targetMode.toUpperCase()}?`,
+      "This will force-close open positions in the current mode first.",
+      "Continue?",
+    ].join("\n");
+    if (!window.confirm(warning)) return;
+
+    setModeSwitching(true);
+    try {
+      const result = await switchTradingMode({
+        from_mode: pnlMode,
+        target_mode: targetMode,
+        venue,
+        force_close_open_positions: true,
+      });
+      setPnlMode(targetMode);
+      setPortfolioInfo(
+        `Mode switched ${result.from_mode}->${result.target_mode}; force-closed ${result.closed_count}/${result.attempted_force_close} open position(s).`
+      );
+    } catch (err) {
+      setPortfolioError(err instanceof Error ? err.message : "Mode switch failed");
+    } finally {
+      setModeSwitching(false);
+    }
+  };
+
 
   useEffect(() => {
     if (!isSelectedSymbolActive) {
@@ -510,7 +540,7 @@ export default function App() {
           portfolioBalances={portfolioBalances}
           liveReadiness={liveReadiness}
           pnlMode={pnlMode}
-          onPnlMode={setPnlMode}
+          onPnlMode={handleModeSwitch}
           onSaveAssetControl={saveAssetControl}
           onSaveAssetTuning={saveAssetTuning}
           onFetchAssetTuningVersions={loadAssetTuningVersions}

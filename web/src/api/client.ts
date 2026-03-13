@@ -1,4 +1,4 @@
-import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, LiveReadiness, OpenPosition, PortfolioBalancesSnapshot, RiskPolicySettings, SimWalletAugmentResponse } from "./types";
+import type { AssetControl, AssetEngineLog, AssetTuningVersion, AssetValueBalanceResponse, Candle, CatchupStatusRow, ClosedTradesResponse, Gap, IndicatorRow, LiveReadiness, ModeSwitchResponse, OpenPosition, PortfolioBalancesSnapshot, RiskPolicySettings, SimWalletAugmentResponse } from "./types";
 
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -318,4 +318,30 @@ export async function fetchLiveReadiness(): Promise<LiveReadiness> {
     throw new Error(`Failed to fetch live readiness: ${detail}`);
   }
   return (await response.json()) as LiveReadiness;
+}
+
+export async function switchTradingMode(args: {
+  from_mode: "sim" | "live";
+  target_mode: "sim" | "live";
+  venue?: string;
+  force_close_open_positions?: boolean;
+}): Promise<ModeSwitchResponse> {
+  const response = await fetch(
+    `${BASE}/control-plane/mode-switch`,
+    withApiKey("write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from_mode: args.from_mode,
+        target_mode: args.target_mode,
+        venue: args.venue,
+        force_close_open_positions: args.force_close_open_positions ?? true,
+      }),
+    })
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to switch mode: ${detail}`);
+  }
+  return (await response.json()) as ModeSwitchResponse;
 }

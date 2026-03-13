@@ -239,6 +239,22 @@ class SimWalletAugmentOut(BaseModel):
     note: str
 
 
+class ModeSwitchRequest(BaseModel):
+    from_mode: str
+    target_mode: str
+    force_close_open_positions: bool = True
+    venue: str | None = None
+
+
+class ModeSwitchOut(BaseModel):
+    from_mode: str
+    target_mode: str
+    attempted_force_close: int
+    closed_count: int
+    switched_controls: int
+    note: str
+
+
 class CatchupStatusOut(BaseModel):
     symbol: str
     timeframe: str

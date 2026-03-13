@@ -23,6 +23,8 @@ from mdtas.api.schemas import (
     AssetValueBalanceRequest,
     SimWalletAugmentOut,
     SimWalletAugmentRequest,
+    ModeSwitchRequest,
+    ModeSwitchOut,
     OpenPositionOut,
     RiskPolicyOut,
     RiskPolicyUpdate,
@@ -32,7 +34,7 @@ from mdtas.api.schemas import (
 from mdtas.config import get_config
 from mdtas.db.session import get_session
 from mdtas.db.trading_repo import TradingRepository
-from mdtas.trading.execution import CcxtExecutionAdapter, SymbolExecutionConstraints, round_down_to_step
+from mdtas.trading.execution import CcxtExecutionAdapter, PaperExecutionAdapter, SymbolExecutionConstraints, round_down_to_step
 from mdtas.trading.runtime_1m_simple import Simple1mParamResolver
 from mdtas.trading.runtime import AssetParamResolver
 from mdtas.trading.runtime_5m_simple import Simple5mParamResolver
@@ -819,6 +821,127 @@ def augment_sim_wallet_balance(
         cash_adjustment_usd=float(row.cash_adjustment_usd),
         asset_adjustment_usd=float(row.asset_adjustment_usd),
         note="SIM wallet adjustment set",
+    )
+
+
+@router.post("/control-plane/mode-switch", response_model=ModeSwitchOut)
+def switch_control_plane_mode(
+    payload: ModeSwitchRequest,
+    _auth: None = Depends(require_write_access),
+    repo: TradingRepository = Depends(get_repo),
+):
+    cfg = get_config()
+    from_mode = _validate_mode(payload.from_mode)
+    target_mode = _validate_mode(payload.target_mode)
+    if from_mode is None or target_mode is None:
+        raise HTTPException(status_code=422, detail="from_mode and target_mode are required")
+    if from_mode == target_mode:
+        raise HTTPException(status_code=422, detail="from_mode and target_mode must differ")
+
+    venue = payload.venue or (cfg.providers.ccxt.venue if cfg.providers.default_provider == "ccxt" else "mock")
+    open_positions = repo.list_open_positions(venue=venue, execution_mode=from_mode)
+
+    attempted_force_close = 0
+    closed_count = 0
+    errors: list[str] = []
+    live_adapters_by_timeframe: dict[str, CcxtExecutionAdapter] = {}
+    paper_adapters_by_timeframe: dict[str, PaperExecutionAdapter] = {}
+
+    if payload.force_close_open_positions:
+        for pos in open_positions:
+            attempted_force_close += 1
+            runtime_cfg = _runtime_config_for_timeframe(cfg, pos.timeframe)
+            constraints = _constraints_for_symbol(runtime_cfg, pos.symbol)
+            raw_exit_price = float(pos.last_price) if pos.last_price is not None else float(pos.entry_price)
+
+            try:
+                if from_mode == "live" and runtime_cfg.execution_adapter == "real":
+                    adapter = live_adapters_by_timeframe.get(pos.timeframe)
+                    if adapter is None:
+                        adapter = _build_live_adapter(cfg, runtime_cfg)
+                        live_adapters_by_timeframe[pos.timeframe] = adapter
+                    fill = adapter.submit_exit(
+                        symbol=pos.symbol,
+                        raw_price=raw_exit_price,
+                        qty=float(pos.qty),
+                        trade_side=pos.trade_side,
+                        constraints=constraints,
+                    )
+                else:
+                    adapter = paper_adapters_by_timeframe.get(pos.timeframe)
+                    if adapter is None:
+                        adapter = PaperExecutionAdapter(slippage_bps=float(runtime_cfg.slippage_bps))
+                        paper_adapters_by_timeframe[pos.timeframe] = adapter
+                    fill = adapter.submit_exit(
+                        symbol=pos.symbol,
+                        raw_price=raw_exit_price,
+                        qty=float(pos.qty),
+                        trade_side=pos.trade_side,
+                        constraints=constraints,
+                    )
+
+                repo.close_position(
+                    position=pos,
+                    exit_ts=datetime.utcnow().replace(microsecond=0),
+                    exit_price=float(fill.price),
+                    exit_spot_price=float(fill.spot_price) if fill.spot_price is not None else float(raw_exit_price),
+                    exit_reason="mode_switch_force_close",
+                    exit_fee=float(fill.fee_usd),
+                    hold_bars_at_exit=int(pos.hold_bars),
+                )
+                closed_count += 1
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{pos.symbol}:{pos.timeframe}:id={pos.id}: {exc}")
+
+    if errors:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Mode switch aborted: failed to force-close one or more positions",
+                "attempted_force_close": attempted_force_close,
+                "closed_count": closed_count,
+                "errors": errors,
+            },
+        )
+
+    controls = repo.list_asset_controls(
+        symbols=cfg.symbols,
+        timeframes=_control_plane_timeframes(cfg),
+        default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+        default_execution_mode="sim",
+        default_trade_side="long_only",
+    )
+
+    switched_controls = 0
+    for item in controls:
+        if item.execution_mode != target_mode:
+            repo.update_asset_control(
+                symbol=item.symbol,
+                timeframe=item.timeframe,
+                default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+                execution_mode=target_mode,
+            )
+            switched_controls += 1
+
+        repo.set_asset_state(
+            symbol=item.symbol,
+            timeframe=item.timeframe,
+            default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+            state="mode_switched",
+            note=(
+                f"mode switch {from_mode}->{target_mode}; "
+                f"forced_closed={closed_count}; baseline reset for new mode"
+            ),
+            log_event=True,
+        )
+
+    return ModeSwitchOut(
+        from_mode=from_mode,
+        target_mode=target_mode,
+        attempted_force_close=attempted_force_close,
+        closed_count=closed_count,
+        switched_controls=switched_controls,
+        note="Mode switched and baseline reset",
     )
 
 

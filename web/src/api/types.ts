@@ -210,6 +210,15 @@ export type SimWalletAugmentResponse = {
   note: string;
 };
 
+export type ModeSwitchResponse = {
+  from_mode: "sim" | "live";
+  target_mode: "sim" | "live";
+  attempted_force_close: number;
+  closed_count: number;
+  switched_controls: number;
+  note: string;
+};
+
 export type LiveReadiness = {
   venue: string;
   sandbox: boolean;
