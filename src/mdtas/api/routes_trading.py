@@ -246,6 +246,77 @@ def _control_plane_timeframes(cfg) -> list[str]:
     return out
 
 
+def _force_close_positions_for_mode(
+    *,
+    cfg,
+    repo: TradingRepository,
+    positions: list[Any],
+    from_mode: str,
+) -> tuple[int, int, list[str]]:
+    attempted_force_close = 0
+    closed_count = 0
+    errors: list[str] = []
+    live_adapters_by_timeframe: dict[str, CcxtExecutionAdapter] = {}
+    paper_adapters_by_timeframe: dict[str, PaperExecutionAdapter] = {}
+
+    live_force_close_fill_tolerance = 0.995
+
+    for pos in positions:
+        attempted_force_close += 1
+        runtime_cfg = _runtime_config_for_timeframe(cfg, pos.timeframe)
+        constraints = _constraints_for_symbol(runtime_cfg, pos.symbol)
+        raw_exit_price = float(pos.last_price) if pos.last_price is not None else float(pos.entry_price)
+        requested_qty = float(pos.qty)
+
+        try:
+            if from_mode == "live" and runtime_cfg.execution_adapter == "real":
+                adapter = live_adapters_by_timeframe.get(pos.timeframe)
+                if adapter is None:
+                    adapter = _build_live_adapter(cfg, runtime_cfg)
+                    live_adapters_by_timeframe[pos.timeframe] = adapter
+                fill = adapter.submit_exit(
+                    symbol=pos.symbol,
+                    raw_price=raw_exit_price,
+                    qty=float(pos.qty),
+                    trade_side=pos.trade_side,
+                    constraints=constraints,
+                )
+                if requested_qty > 0:
+                    fill_ratio = float(fill.qty) / requested_qty
+                    if fill_ratio < live_force_close_fill_tolerance:
+                        raise ValueError(
+                            "Live force-close not fully filled on exchange "
+                            f"(filled={float(fill.qty):.8f}, requested={requested_qty:.8f}, ratio={fill_ratio:.4f})"
+                        )
+            else:
+                adapter = paper_adapters_by_timeframe.get(pos.timeframe)
+                if adapter is None:
+                    adapter = PaperExecutionAdapter(slippage_bps=float(runtime_cfg.slippage_bps))
+                    paper_adapters_by_timeframe[pos.timeframe] = adapter
+                fill = adapter.submit_exit(
+                    symbol=pos.symbol,
+                    raw_price=raw_exit_price,
+                    qty=float(pos.qty),
+                    trade_side=pos.trade_side,
+                    constraints=constraints,
+                )
+
+            repo.close_position(
+                position=pos,
+                exit_ts=datetime.utcnow().replace(microsecond=0),
+                exit_price=float(fill.price),
+                exit_spot_price=float(fill.spot_price) if fill.spot_price is not None else float(raw_exit_price),
+                exit_reason="mode_switch_force_close",
+                exit_fee=float(fill.fee_usd),
+                hold_bars_at_exit=int(pos.hold_bars),
+            )
+            closed_count += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{pos.symbol}:{pos.timeframe}:id={pos.id}: {exc}")
+
+    return attempted_force_close, closed_count, errors
+
+
 def _merged_simple_tuning_params(*, base: dict[str, float | int], override: dict[str, float | int] | None) -> dict[str, float | int]:
     out = dict(base)
     if not override:
@@ -844,64 +915,14 @@ def switch_control_plane_mode(
     attempted_force_close = 0
     closed_count = 0
     errors: list[str] = []
-    live_adapters_by_timeframe: dict[str, CcxtExecutionAdapter] = {}
-    paper_adapters_by_timeframe: dict[str, PaperExecutionAdapter] = {}
-
-    live_force_close_fill_tolerance = 0.995
 
     if payload.force_close_open_positions:
-        for pos in open_positions:
-            attempted_force_close += 1
-            runtime_cfg = _runtime_config_for_timeframe(cfg, pos.timeframe)
-            constraints = _constraints_for_symbol(runtime_cfg, pos.symbol)
-            raw_exit_price = float(pos.last_price) if pos.last_price is not None else float(pos.entry_price)
-            requested_qty = float(pos.qty)
-
-            try:
-                if from_mode == "live" and runtime_cfg.execution_adapter == "real":
-                    adapter = live_adapters_by_timeframe.get(pos.timeframe)
-                    if adapter is None:
-                        adapter = _build_live_adapter(cfg, runtime_cfg)
-                        live_adapters_by_timeframe[pos.timeframe] = adapter
-                    fill = adapter.submit_exit(
-                        symbol=pos.symbol,
-                        raw_price=raw_exit_price,
-                        qty=float(pos.qty),
-                        trade_side=pos.trade_side,
-                        constraints=constraints,
-                    )
-                    if requested_qty > 0:
-                        fill_ratio = float(fill.qty) / requested_qty
-                        if fill_ratio < live_force_close_fill_tolerance:
-                            raise ValueError(
-                                "Live force-close not fully filled on exchange "
-                                f"(filled={float(fill.qty):.8f}, requested={requested_qty:.8f}, ratio={fill_ratio:.4f})"
-                            )
-                else:
-                    adapter = paper_adapters_by_timeframe.get(pos.timeframe)
-                    if adapter is None:
-                        adapter = PaperExecutionAdapter(slippage_bps=float(runtime_cfg.slippage_bps))
-                        paper_adapters_by_timeframe[pos.timeframe] = adapter
-                    fill = adapter.submit_exit(
-                        symbol=pos.symbol,
-                        raw_price=raw_exit_price,
-                        qty=float(pos.qty),
-                        trade_side=pos.trade_side,
-                        constraints=constraints,
-                    )
-
-                repo.close_position(
-                    position=pos,
-                    exit_ts=datetime.utcnow().replace(microsecond=0),
-                    exit_price=float(fill.price),
-                    exit_spot_price=float(fill.spot_price) if fill.spot_price is not None else float(raw_exit_price),
-                    exit_reason="mode_switch_force_close",
-                    exit_fee=float(fill.fee_usd),
-                    hold_bars_at_exit=int(pos.hold_bars),
-                )
-                closed_count += 1
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"{pos.symbol}:{pos.timeframe}:id={pos.id}: {exc}")
+        attempted_force_close, closed_count, errors = _force_close_positions_for_mode(
+            cfg=cfg,
+            repo=repo,
+            positions=open_positions,
+            from_mode=from_mode,
+        )
 
     if errors:
         raise HTTPException(
@@ -975,6 +996,50 @@ def update_asset_control(
     trade_side = payload.trade_side
     if trade_side is not None:
         _validate_trade_side(trade_side)
+
+    current_controls = list_asset_controls(timeframe=timeframe, _auth=None, repo=repo)
+    current = next((row for row in current_controls if row.symbol == symbol and row.timeframe == timeframe), None)
+    if current is None:
+        raise HTTPException(status_code=500, detail="Current control row not found")
+
+    if (
+        payload.execution_mode is not None
+        and payload.execution_mode != current.execution_mode
+        and payload.force_close_open_positions
+    ):
+        open_positions = repo.list_open_positions(
+            symbol=symbol,
+            timeframe=timeframe,
+            execution_mode=current.execution_mode,
+        )
+        attempted_force_close, closed_count, errors = _force_close_positions_for_mode(
+            cfg=cfg,
+            repo=repo,
+            positions=open_positions,
+            from_mode=current.execution_mode,
+        )
+        if errors:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Asset mode update aborted: failed to force-close one or more positions",
+                    "attempted_force_close": attempted_force_close,
+                    "closed_count": closed_count,
+                    "errors": errors,
+                },
+            )
+
+        repo.set_asset_state(
+            symbol=symbol,
+            timeframe=timeframe,
+            default_soft_risk_limit_usd=cfg.trading.soft_portfolio_risk_limit_usd,
+            state="mode_switched",
+            note=(
+                f"asset mode switch {current.execution_mode}->{payload.execution_mode}; "
+                f"forced_closed={closed_count}; baseline reset for new mode"
+            ),
+            log_event=True,
+        )
 
     item = repo.update_asset_control(
         symbol=symbol,

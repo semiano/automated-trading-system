@@ -156,6 +156,7 @@ class AssetControlOut(BaseModel):
 class AssetControlUpdate(BaseModel):
     enabled: bool | None = None
     execution_mode: str | None = None
+    force_close_open_positions: bool = False
     trade_side: str | None = None
     soft_risk_limit_usd: float | None = Field(default=None, ge=0.0)
 

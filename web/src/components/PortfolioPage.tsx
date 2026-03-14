@@ -18,6 +18,7 @@ type Props = {
     timeframe: string;
     enabled?: boolean;
     execution_mode?: "sim" | "live";
+    force_close_open_positions?: boolean;
     trade_side?: "long_only" | "long_short" | "short_only";
     soft_risk_limit_usd?: number;
   }) => Promise<void>;
@@ -1058,9 +1059,21 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         type="button"
                         disabled={saving}
                         onClick={async () => {
+                          if (row.execution_mode === "sim") return;
+                          const warning = [
+                            `Switch ${row.symbol} ${row.timeframe} engine to SIM?`,
+                            "This will force-close open positions for this asset/timeframe in ACTIVE mode first.",
+                            "Continue?",
+                          ].join("\n");
+                          if (!window.confirm(warning)) return;
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, execution_mode: "sim" });
+                            await onSaveAssetControl({
+                              symbol: row.symbol,
+                              timeframe: row.timeframe,
+                              execution_mode: "sim",
+                              force_close_open_positions: true,
+                            });
                           } finally {
                             setSaving(false);
                           }
@@ -1080,9 +1093,21 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                         type="button"
                         disabled={saving}
                         onClick={async () => {
+                          if (row.execution_mode === "live") return;
+                          const warning = [
+                            `Switch ${row.symbol} ${row.timeframe} engine to ACTIVE?`,
+                            "This will force-close open positions for this asset/timeframe in SIM mode first.",
+                            "Continue?",
+                          ].join("\n");
+                          if (!window.confirm(warning)) return;
                           setSaving(true);
                           try {
-                            await onSaveAssetControl({ symbol: row.symbol, timeframe: row.timeframe, execution_mode: "live" });
+                            await onSaveAssetControl({
+                              symbol: row.symbol,
+                              timeframe: row.timeframe,
+                              execution_mode: "live",
+                              force_close_open_positions: true,
+                            });
                           } finally {
                             setSaving(false);
                           }

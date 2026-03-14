@@ -132,6 +132,7 @@ export async function updateAssetControl(args: {
   timeframe: string;
   enabled?: boolean;
   execution_mode?: "sim" | "live";
+  force_close_open_positions?: boolean;
   trade_side?: "long_only" | "long_short" | "short_only";
   soft_risk_limit_usd?: number;
 }): Promise<AssetControl> {
@@ -143,6 +144,7 @@ export async function updateAssetControl(args: {
       body: JSON.stringify({
         enabled: args.enabled,
         execution_mode: args.execution_mode,
+        force_close_open_positions: args.force_close_open_positions,
         trade_side: args.trade_side,
         soft_risk_limit_usd: args.soft_risk_limit_usd,
       }),
