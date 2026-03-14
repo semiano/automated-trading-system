@@ -163,7 +163,7 @@ def _run_ws_trades_loop(
     _ws_warmup_from_rest(repo, provider, cfg, symbols, venue)
 
     aggregator = TradeToCandleAggregator()
-    rollup_targets = [item for item in cfg.ingestion.ws_rollup_timeframes if item in {"5m", "1h"}]
+    rollup_targets = [item for item in cfg.ingestion.ws_rollup_timeframes if item in {"5m", "15m", "1h"}]
     one_minute_buffers: dict[str, deque[AggCandle]] = defaultdict(lambda: deque(maxlen=240))
     last_rollup_close_ms: dict[tuple[str, str], int] = {}
     last_one_min_close_ms: dict[str, int] = {}

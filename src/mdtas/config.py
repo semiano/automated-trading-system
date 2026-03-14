@@ -26,7 +26,7 @@ class ProvidersConfig(BaseModel):
 
 class IngestionConfig(BaseModel):
     mode: Literal["rest", "ws_trades"] = "rest"
-    ws_rollup_timeframes: list[Literal["5m", "1h"]] = Field(default_factory=lambda: ["5m", "1h"])
+    ws_rollup_timeframes: list[Literal["5m", "15m", "1h"]] = Field(default_factory=lambda: ["5m", "15m", "1h"])
     ws_reconnect_initial_backoff_seconds: int = 1
     ws_reconnect_max_backoff_seconds: int = 30
     warmup_bars: int = 2000

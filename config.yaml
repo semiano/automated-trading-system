@@ -7,15 +7,18 @@ providers:
 symbols:
   - "HBAR/USD"
   - "XRP/USD"
+  - "XCN/USD"
 
 timeframes:
   - "1m"
   - "5m"
+  - "15m"
   - "1h"
 
 cache_horizon_days:
   "1m": 30
   "5m": 180
+  "15m": 365
   "1h": 730
   "1d": 3650
 
@@ -23,6 +26,7 @@ ingestion:
   mode: "ws_trades"
   ws_rollup_timeframes:
     - "5m"
+    - "15m"
     - "1h"
   ws_reconnect_initial_backoff_seconds: 1
   ws_reconnect_max_backoff_seconds: 30

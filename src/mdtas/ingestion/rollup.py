@@ -7,20 +7,24 @@ from typing import Literal
 from mdtas.ingestion.trade_aggregator import Candle
 
 
-def _required_group_size(target_tf: Literal["5m", "1h"]) -> int:
+def _required_group_size(target_tf: Literal["5m", "15m", "1h"]) -> int:
     if target_tf == "5m":
         return 5
+    if target_tf == "15m":
+        return 15
     return 60
 
 
-def _is_aligned_close(ts_close_ms: int, target_tf: Literal["5m", "1h"]) -> bool:
+def _is_aligned_close(ts_close_ms: int, target_tf: Literal["5m", "15m", "1h"]) -> bool:
     ts = datetime.fromtimestamp(ts_close_ms / 1000, tz=timezone.utc)
     if target_tf == "5m":
         return ts.second == 0 and ts.microsecond == 0 and (ts.minute % 5 == 0)
+    if target_tf == "15m":
+        return ts.second == 0 and ts.microsecond == 0 and (ts.minute % 15 == 0)
     return ts.second == 0 and ts.microsecond == 0 and ts.minute == 0
 
 
-def rollup_candles(candles_1m: list[Candle], target_tf: Literal["5m", "1h"]) -> list[Candle]:
+def rollup_candles(candles_1m: list[Candle], target_tf: Literal["5m", "15m", "1h"]) -> list[Candle]:
     if not candles_1m:
         return []
 

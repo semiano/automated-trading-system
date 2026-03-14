@@ -49,3 +49,22 @@ def test_rollup_does_not_emit_partial_group():
 
     out = rollup_candles(candles, "5m")
     assert out == []
+
+
+def test_rollup_15m_alignment_and_values():
+    fifteen_min_close = ((1_700_000_000_000 // 900_000) + 1) * 900_000
+    candles: list[Candle] = []
+    for idx in range(15):
+        close_ms = fifteen_min_close - ((14 - idx) * 60_000)
+        price = 1.0 + (idx * 0.01)
+        candles.append(_mk_1m("XCN/USD", close_ms, price, price + 0.02, price - 0.02, price + 0.01, 10.0 + idx))
+
+    out = rollup_candles(candles, "15m")
+    assert len(out) == 1
+    row = out[0]
+    assert row.ts_close == fifteen_min_close
+    assert row.open == candles[0].open
+    assert row.close == candles[-1].close
+    assert row.high == max(item.high for item in candles)
+    assert row.low == min(item.low for item in candles)
+    assert row.volume == sum(item.volume for item in candles)
