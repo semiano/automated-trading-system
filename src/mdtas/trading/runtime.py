@@ -18,6 +18,7 @@ from mdtas.trading.execution import (
     CcxtExecutionAdapter,
     PaperExecutionAdapter,
     SymbolExecutionConstraints,
+    create_ccxt_quote_snapshotter,
     gap_aware_raw_exit_price,
     round_down_to_step,
 )
@@ -260,6 +261,8 @@ class TradingRuntime:
     def apply_config(self, cfg: AppConfig) -> None:
         old_adapter = self.cfg.trading.execution_adapter
         old_slippage = self.cfg.trading.slippage_bps
+        old_sim_slippage_mode = self.cfg.trading.sim_slippage_mode
+        old_sim_max_slippage_bps = self.cfg.trading.sim_max_slippage_bps
         old_provider = self.cfg.providers.default_provider
         old_ccxt_venue = self.cfg.providers.ccxt.venue
         old_ccxt_rate_limit = self.cfg.providers.ccxt.rate_limit
@@ -281,6 +284,8 @@ class TradingRuntime:
         execution_changed = (
             old_adapter != cfg.trading.execution_adapter
             or old_slippage != cfg.trading.slippage_bps
+            or old_sim_slippage_mode != cfg.trading.sim_slippage_mode
+            or old_sim_max_slippage_bps != cfg.trading.sim_max_slippage_bps
             or old_provider != cfg.providers.default_provider
             or old_ccxt_venue != cfg.providers.ccxt.venue
             or old_ccxt_rate_limit != cfg.providers.ccxt.rate_limit
@@ -303,7 +308,22 @@ class TradingRuntime:
 
     def _build_execution_adapter(self):
         if self.cfg.trading.execution_adapter != "real":
-            return PaperExecutionAdapter(slippage_bps=self.cfg.trading.slippage_bps)
+            quote_snapshot = None
+            if self.cfg.trading.sim_slippage_mode == "live_spread" and self.cfg.providers.default_provider == "ccxt":
+                try:
+                    quote_snapshot = create_ccxt_quote_snapshotter(
+                        venue=self.cfg.providers.ccxt.venue,
+                        rate_limit=self.cfg.providers.ccxt.rate_limit,
+                        sandbox=self.cfg.providers.ccxt.sandbox,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Live-spread SIM quote snapshot unavailable; fallback to fixed slippage: %s", exc)
+            return PaperExecutionAdapter(
+                slippage_bps=self.cfg.trading.slippage_bps,
+                slippage_mode=self.cfg.trading.sim_slippage_mode,
+                quote_snapshot=quote_snapshot,
+                max_slippage_bps=self.cfg.trading.sim_max_slippage_bps,
+            )
 
         try:
             adapter = CcxtExecutionAdapter(
@@ -330,7 +350,11 @@ class TradingRuntime:
             return adapter
         except Exception as exc:  # noqa: BLE001
             logger.exception("Falling back to paper execution adapter: %s", exc)
-            return PaperExecutionAdapter(slippage_bps=self.cfg.trading.slippage_bps)
+            return PaperExecutionAdapter(
+                slippage_bps=self.cfg.trading.slippage_bps,
+                slippage_mode=self.cfg.trading.sim_slippage_mode,
+                max_slippage_bps=self.cfg.trading.sim_max_slippage_bps,
+            )
 
     def is_symbol_enabled(self, symbol: str) -> bool:
         timeframe = self.cfg.trading.runtime_timeframe

@@ -18,6 +18,7 @@ from mdtas.trading.execution import (
     CcxtExecutionAdapter,
     PaperExecutionAdapter,
     SymbolExecutionConstraints,
+    create_ccxt_quote_snapshotter,
     gap_aware_raw_exit_price,
 )
 from mdtas.trading.runtime import compute_entry_sizing, evaluate_entry_guards
@@ -202,7 +203,22 @@ class Simple1mRuntime:
     def _build_execution_adapter(self):
         cfg = self.cfg.trading_1m
         if cfg.execution_adapter != "real":
-            return PaperExecutionAdapter(slippage_bps=cfg.slippage_bps)
+            quote_snapshot = None
+            if cfg.sim_slippage_mode == "live_spread" and self.cfg.providers.default_provider == "ccxt":
+                try:
+                    quote_snapshot = create_ccxt_quote_snapshotter(
+                        venue=self.cfg.providers.ccxt.venue,
+                        rate_limit=self.cfg.providers.ccxt.rate_limit,
+                        sandbox=self.cfg.providers.ccxt.sandbox,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("1m runtime live-spread SIM quote snapshot unavailable; fallback to fixed slippage: %s", exc)
+            return PaperExecutionAdapter(
+                slippage_bps=cfg.slippage_bps,
+                slippage_mode=cfg.sim_slippage_mode,
+                quote_snapshot=quote_snapshot,
+                max_slippage_bps=cfg.sim_max_slippage_bps,
+            )
 
         try:
             return CcxtExecutionAdapter(
@@ -222,7 +238,11 @@ class Simple1mRuntime:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("1m runtime real adapter failed; fallback to paper: %s", exc)
-            return PaperExecutionAdapter(slippage_bps=cfg.slippage_bps)
+            return PaperExecutionAdapter(
+                slippage_bps=cfg.slippage_bps,
+                slippage_mode=cfg.sim_slippage_mode,
+                max_slippage_bps=cfg.sim_max_slippage_bps,
+            )
 
     def _constraints_for_symbol(self, symbol: str) -> SymbolExecutionConstraints:
         cfg = self.cfg.trading_1m

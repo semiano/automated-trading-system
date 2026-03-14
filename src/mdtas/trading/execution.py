@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 import ccxt
 
@@ -81,9 +81,84 @@ class ExecutionAdapter(Protocol):
         ...
 
 
+QuoteSnapshotFn = Callable[[str], dict[str, float] | None]
+
+
+def create_ccxt_quote_snapshotter(*, venue: str, rate_limit: bool, sandbox: bool) -> QuoteSnapshotFn:
+    venue_cls = getattr(ccxt, venue)
+    kwargs: dict[str, object] = {"enableRateLimit": bool(rate_limit)}
+    exchange = venue_cls(kwargs)
+    if sandbox and hasattr(exchange, "set_sandbox_mode"):
+        exchange.set_sandbox_mode(True)
+    exchange.load_markets()
+
+    def _snapshot(symbol: str) -> dict[str, float] | None:
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+        except Exception:  # noqa: BLE001
+            return None
+        if not isinstance(ticker, dict):
+            return None
+
+        bid_raw = ticker.get("bid")
+        ask_raw = ticker.get("ask")
+        last_raw = ticker.get("last")
+        close_raw = ticker.get("close")
+
+        bid = float(bid_raw) if bid_raw is not None else None
+        ask = float(ask_raw) if ask_raw is not None else None
+        last = float(last_raw) if last_raw is not None else (float(close_raw) if close_raw is not None else None)
+
+        out: dict[str, float] = {}
+        if bid is not None and bid > 0:
+            out["bid"] = bid
+        if ask is not None and ask > 0:
+            out["ask"] = ask
+        if last is not None and last > 0:
+            out["last"] = last
+        return out or None
+
+    return _snapshot
+
+
 class PaperExecutionAdapter:
-    def __init__(self, slippage_bps: float) -> None:
-        self.slip = float(slippage_bps) / 10000.0
+    def __init__(
+        self,
+        *,
+        slippage_bps: float,
+        slippage_mode: str = "fixed",
+        quote_snapshot: QuoteSnapshotFn | None = None,
+        max_slippage_bps: float = 50.0,
+    ) -> None:
+        self.base_slippage_bps = max(0.0, float(slippage_bps))
+        self.slippage_mode = str(slippage_mode).lower()
+        self.quote_snapshot = quote_snapshot
+        self.max_slippage_bps = max(0.0, float(max_slippage_bps))
+
+    def _resolve_fill_inputs(self, *, symbol: str, raw_price: float, side: TradeActionSide) -> tuple[float, float, float]:
+        # Returns (reference_spot, executable_base_price, effective_slippage_bps).
+        if self.slippage_mode != "live_spread" or self.quote_snapshot is None:
+            return float(raw_price), float(raw_price), self.base_slippage_bps
+
+        quote = self.quote_snapshot(symbol)
+        if not quote:
+            return float(raw_price), float(raw_price), self.base_slippage_bps
+
+        bid = quote.get("bid")
+        ask = quote.get("ask")
+        if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+            return float(raw_price), float(raw_price), self.base_slippage_bps
+
+        mid = (bid + ask) * 0.5
+        if mid <= 0:
+            return float(raw_price), float(raw_price), self.base_slippage_bps
+
+        base_px = ask if side == "buy" else bid
+        half_spread_bps = abs(base_px - mid) / mid * 10000.0
+        effective_bps = max(self.base_slippage_bps, half_spread_bps)
+        if self.max_slippage_bps > 0:
+            effective_bps = min(effective_bps, self.max_slippage_bps)
+        return float(mid), float(base_px), float(effective_bps)
 
     def submit_entry(
         self,
@@ -95,7 +170,8 @@ class PaperExecutionAdapter:
         constraints: SymbolExecutionConstraints,
     ) -> Fill:
         side: TradeActionSide = "buy" if trade_side == "long" else "sell"
-        price = apply_slippage(raw_price, side=side, slip=self.slip)
+        spot_price, base_price, effective_bps = self._resolve_fill_inputs(symbol=symbol, raw_price=raw_price, side=side)
+        price = apply_slippage(base_price, side=side, slip=(effective_bps / 10000.0))
         price = apply_price_tick(price, side=side, tick=constraints.price_tick)
         notional = float(price) * float(qty)
         fee = notional * (float(constraints.fee_bps) / 10000.0)
@@ -105,7 +181,7 @@ class PaperExecutionAdapter:
             qty=float(qty),
             notional_usd=float(notional),
             fee_usd=float(fee),
-            spot_price=float(raw_price),
+            spot_price=float(spot_price),
         )
 
     def submit_exit(
@@ -118,7 +194,8 @@ class PaperExecutionAdapter:
         constraints: SymbolExecutionConstraints,
     ) -> Fill:
         side: TradeActionSide = "sell" if trade_side == "long" else "buy"
-        price = apply_slippage(raw_price, side=side, slip=self.slip)
+        spot_price, base_price, effective_bps = self._resolve_fill_inputs(symbol=symbol, raw_price=raw_price, side=side)
+        price = apply_slippage(base_price, side=side, slip=(effective_bps / 10000.0))
         price = apply_price_tick(price, side=side, tick=constraints.price_tick)
         notional = float(price) * float(qty)
         fee = notional * (float(constraints.fee_bps) / 10000.0)
@@ -128,7 +205,7 @@ class PaperExecutionAdapter:
             qty=float(qty),
             notional_usd=float(notional),
             fee_usd=float(fee),
-            spot_price=float(raw_price),
+            spot_price=float(spot_price),
         )
 
 

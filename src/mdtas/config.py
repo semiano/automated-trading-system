@@ -152,6 +152,8 @@ class TradingConfig(BaseModel):
     portfolio_soft_risk_limit_usd: float = 0.0
     fee_bps: float = 0.0
     slippage_bps: float = 0.0
+    sim_slippage_mode: Literal["fixed", "live_spread"] = "fixed"
+    sim_max_slippage_bps: float = 50.0
     tuned_params_path: str = "artifacts/xrp_tuned_engine_params_selected.yaml"
     default_params: StrategyParamsConfig = Field(default_factory=StrategyParamsConfig)
     per_asset_params: dict[str, StrategyParamsConfig] = Field(default_factory=dict)
@@ -222,6 +224,8 @@ class Trading5mConfig(BaseModel):
     live_ack_env_var_value: str = "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
     fee_bps: float = 0.0
     slippage_bps: float = 0.0
+    sim_slippage_mode: Literal["fixed", "live_spread"] = "fixed"
+    sim_max_slippage_bps: float = 50.0
     tuned_params_path: str = "artifacts/xrp_engine_v3_5m_best_params.yaml"
     default_params: SimpleEngine5mParamsConfig = Field(default_factory=SimpleEngine5mParamsConfig)
     per_asset_params: dict[str, SimpleEngine5mParamsConfig] = Field(default_factory=dict)
@@ -271,6 +275,8 @@ class Trading1mConfig(BaseModel):
     live_ack_env_var_value: str = "YES_I_ACKNOWLEDGE_LIVE_TRADING_RISK"
     fee_bps: float = 0.0
     slippage_bps: float = 0.0
+    sim_slippage_mode: Literal["fixed", "live_spread"] = "fixed"
+    sim_max_slippage_bps: float = 50.0
     tuned_params_path: str = "artifacts/xrp_engine_v3_1m_best_params.yaml"
     default_params: SimpleEngine1mParamsConfig = Field(default_factory=SimpleEngine1mParamsConfig)
     per_asset_params: dict[str, SimpleEngine1mParamsConfig] = Field(default_factory=dict)
