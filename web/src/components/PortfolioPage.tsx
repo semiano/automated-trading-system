@@ -68,22 +68,17 @@ function timeframeToSeconds(tf: string): number | null {
   return null;
 }
 
-function tradeLengthBars(entryTs: string, exitTs: string, timeframe: string): number | null {
-  const tfSeconds = timeframeToSeconds(timeframe);
-  if (!tfSeconds || !Number.isFinite(tfSeconds) || tfSeconds <= 0) return null;
+function tradeLengthMinutes(entryTs: string, exitTs: string): number | null {
   const entryMs = Date.parse(entryTs);
   const exitMs = Date.parse(exitTs);
   if (!Number.isFinite(entryMs) || !Number.isFinite(exitMs)) return null;
-  const elapsedSeconds = Math.max(0, (exitMs - entryMs) / 1000);
-  return Math.max(1, Math.round(elapsedSeconds / tfSeconds));
+  return Math.max(0, (exitMs - entryMs) / 60000);
 }
 
 function tradeLengthLabel(trade: ClosedTrade): string {
-  if (typeof trade.hold_bars_at_exit === "number" && Number.isFinite(trade.hold_bars_at_exit) && trade.hold_bars_at_exit > 0) {
-    return `${trade.hold_bars_at_exit} @ ${trade.timeframe}`;
-  }
-  const barsHeld = tradeLengthBars(trade.entry_ts, trade.exit_ts, trade.timeframe);
-  return barsHeld !== null ? `${barsHeld} @ ${trade.timeframe}` : "-";
+  const minutesHeld = tradeLengthMinutes(trade.entry_ts, trade.exit_ts);
+  if (minutesHeld === null) return "-";
+  return `${minutesHeld.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })} min`;
 }
 
 function usd(value: number): string {
@@ -1687,7 +1682,7 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
                 <th style={{ textAlign: "left", padding: 8 }}>Symbol</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Mode</th>
                 <th style={{ textAlign: "left", padding: 8 }}>TF</th>
-                <th style={{ textAlign: "right", padding: 8 }}>Length</th>
+                <th style={{ textAlign: "right", padding: 8 }}>Length (min)</th>
                 <th style={{ textAlign: "left", padding: 8 }}>Side</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Entry Fill</th>
                 <th style={{ textAlign: "right", padding: 8 }}>Entry Spot</th>
