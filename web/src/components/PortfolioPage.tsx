@@ -610,8 +610,14 @@ export default function PortfolioPage({ openPositions, closedTrades, totalNetPnl
     });
 
     const totalRequiredCashUsd = assetRows.reduce((sum, row) => sum + row.required, 0);
-    const totalActualCashUsd = assetRows.reduce((sum, row) => sum + row.cashUsd, 0);
-    const totalActualCashQty = assetRows.reduce((sum, row) => sum + row.cashQty, 0);
+    // In LIVE mode, multiple symbols can share the same quote wallet (e.g., USD), so
+    // summing per-symbol cash duplicates the same balance. Use API portfolio cash total.
+    const totalActualCashUsd = isSimBalances
+      ? assetRows.reduce((sum, row) => sum + row.cashUsd, 0)
+      : Number(portfolioBalances?.cash_value_usd || 0);
+    const totalActualCashQty = isSimBalances
+      ? assetRows.reduce((sum, row) => sum + row.cashQty, 0)
+      : Number(portfolioBalances?.cash_value_usd || 0);
     const cashGapUsd = totalActualCashUsd - totalRequiredCashUsd;
     let cashStatus: "aligned" | "needs_alignment" | "critical" | "surplus" | "no_target" = "no_target";
     if (totalRequiredCashUsd > 0) {
