@@ -99,7 +99,12 @@ $files = @(
     "web/src/components/ChartLayout.tsx",
     "web/src/components/SymbolTimeframePicker.tsx",
     "web/src/components/PortfolioPage.tsx",
+    "web/src/components/IngestionStatusPage.tsx",
+    "web/src/components/DataHealthPanel.tsx",
+    "web/src/components/SelectedAssetLivePanel.tsx",
+    "web/src/utils/time.ts",
     "web/src/app.tsx",
+    "web/vite.config.ts",
     "web/tsconfig.json",
     "web/src/api/types.ts",
     "web/src/api/client.ts"
@@ -156,8 +161,8 @@ else
   sed -i 's|^MDTAS_CONFIG_FILE=.*|MDTAS_CONFIG_FILE=./config.yaml|' .env.docker
 fi
 
-# Remove stale TypeScript emit artifacts that can shadow .ts sources in Vite.
-rm -f web/src/api/client.js web/src/api/types.js
+# Remove stale TypeScript emit artifacts that can shadow .ts/.tsx sources in Vite.
+find web/src -type f -name '*.js' -delete || true
 
 docker compose --env-file .env.docker up -d --build api ingestion trader trader_5m trader_1h web
 
