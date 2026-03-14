@@ -83,6 +83,8 @@ $files = @(
     "src/mdtas/indicators/engine.py",
     "src/mdtas/trading/runtime_1m_simple.py",
     "src/mdtas/trading/runtime_5m_simple.py",
+    "src/mdtas/ingestion/live_updater.py",
+    "src/mdtas/ingestion/rollup.py",
     "src/mdtas/api/auth.py",
     "src/mdtas/api/app.py",
     "src/mdtas/api/routes_indicators.py",
