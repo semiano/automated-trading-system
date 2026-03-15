@@ -120,6 +120,8 @@ ${exchangeApiSecret} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_API_SE
 ${exchangeApiPassword} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_API_PASSWORD"
 ${exchangeSandbox} = Get-OptionalEnvValue -Path $envPath -Key "EXCHANGE_SANDBOX"
 ${liveAck} = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_ENABLE_LIVE_TRADING"
+${sqlApiEnabled} = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_ENABLE_SQL_API"
+${sqlApiAllowWrite} = Get-OptionalEnvValue -Path $envPath -Key "MDTAS_SQL_API_ALLOW_WRITE"
 if ($readToken) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_API_READ_TOKEN" -Value $readToken
     Set-EnvValueInFile -Path $envDockerPath -Key "VITE_API_READ_TOKEN" -Value $readToken
@@ -142,6 +144,12 @@ if ($exchangeSandbox) {
 }
 if ($liveAck) {
     Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_ENABLE_LIVE_TRADING" -Value $liveAck
+}
+if ($sqlApiEnabled) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_ENABLE_SQL_API" -Value $sqlApiEnabled
+}
+if ($sqlApiAllowWrite) {
+    Set-EnvValueInFile -Path $envDockerPath -Key "MDTAS_SQL_API_ALLOW_WRITE" -Value $sqlApiAllowWrite
 }
 
 Write-Host "Uploading .env.docker to $ip ..."
