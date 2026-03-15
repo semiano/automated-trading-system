@@ -2,6 +2,8 @@
 
 This guide describes a safer way to fetch VPS market data directly over HTTP, without shelling into the server.
 
+It also includes an authenticated SQL admin endpoint for direct DB queries/mutations when explicitly enabled.
+
 ## Scope Model
 
 The API supports two scopes via `X-API-Key`:
@@ -17,6 +19,7 @@ The API supports two scopes via `X-API-Key`:
   - `/api/v1/trades/closed`
 - `write`:
   - Control-plane and mutation endpoints (asset controls, value balance, risk policy, backfill, reload status)
+  - SQL admin endpoint: `/api/v1/admin/sql/execute` (guarded by dedicated enable flags)
 
 `write` keys can also read.
 
@@ -41,6 +44,46 @@ MDTAS_API_READ_TOKEN=replace-with-long-random-read-token
 MDTAS_API_WRITE_TOKEN=replace-with-long-random-write-token
 VITE_API_READ_TOKEN=replace-with-long-random-read-token
 VITE_API_WRITE_TOKEN=replace-with-long-random-write-token
+MDTAS_ENABLE_SQL_API=false
+MDTAS_SQL_API_ALLOW_WRITE=false
+```
+
+## SQL Admin Endpoint
+
+Endpoint:
+
+- `POST /api/v1/admin/sql/execute`
+
+Auth:
+
+- Requires `write` token (`X-API-Key`).
+
+Runtime safety flags:
+
+- `MDTAS_ENABLE_SQL_API=true` is required to enable endpoint access.
+- `MDTAS_SQL_API_ALLOW_WRITE=true` is additionally required for mutating statements (`insert/update/delete/ddl`).
+
+Request payload:
+
+```json
+{
+  "sql": "SELECT id, symbol, execution_mode FROM trades WHERE symbol = :symbol ORDER BY id DESC",
+  "params": {"symbol": "XRP/USD"},
+  "max_rows": 200
+}
+```
+
+Notes:
+
+- Single statement only (no multi-statement batches).
+- Returns structured JSON with `statement_type`, `rowcount`, `rows`, `truncated`.
+
+PowerShell helper (project custom tool-style function):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke_vps_sql_api.ps1 `
+  -Sql "SELECT execution_mode, COUNT(*) AS trades FROM trades GROUP BY execution_mode" `
+  -MaxRows 100
 ```
 
 ## Local GHCP Usage

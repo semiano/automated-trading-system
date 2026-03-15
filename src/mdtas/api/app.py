@@ -10,6 +10,7 @@ from mdtas.api.routes_gaps import router as gaps_router
 from mdtas.api.routes_health import router as health_router
 from mdtas.api.routes_ingestion_status import router as ingestion_status_router
 from mdtas.api.routes_indicators import router as indicators_router
+from mdtas.api.routes_sql_admin import router as sql_admin_router
 from mdtas.api.routes_trading import router as trading_router
 from mdtas.db.session import init_db
 from mdtas.logging import setup_logging
@@ -40,3 +41,4 @@ app.include_router(features_router, prefix="/api/v1")
 app.include_router(gaps_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
 app.include_router(ingestion_status_router, prefix="/api/v1", dependencies=[Depends(require_read_access)])
 app.include_router(trading_router, prefix="/api/v1")
+app.include_router(sql_admin_router, prefix="/api/v1")

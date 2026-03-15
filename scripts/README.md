@@ -54,6 +54,10 @@ Use these first in day-to-day workflow.
   - Pulls candles/indicators/gaps from VPS over authenticated HTTP API (no shell hop).
   - Use for GHCP analysis sessions that only need read-only market data.
 
+- `invoke_vps_sql_api.ps1`
+  - Calls authenticated SQL admin API endpoint directly (no SSH shell hop).
+  - Use for controlled DB queries, and optionally writes when SQL write mode is explicitly enabled on VPS.
+
 ## Local Runner Scripts
 
 - `run_api_local.sh`, `run_ingestion_local.sh`, `run_trader_local.sh`, `run_web_local.sh`
@@ -135,4 +139,5 @@ Current deprecated shim:
 - Prefer `deploy_vps_engine_iteration_hotfix.ps1` for normal hotfix deployments.
 - Prefer `check_vps_ingestion_status.ps1` and escalate to `check_vps_ingestion_ws_debug.ps1` when needed.
 - For API-token workflow details, see `docs/vps_api_access.md`.
+- For SQL-over-API usage and safety flags, see `docs/vps_api_access.md`.
 - Keep this file updated when scripts are added/removed so operators have one reliable index.

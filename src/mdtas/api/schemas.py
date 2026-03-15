@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -291,3 +292,16 @@ class PortfolioBalancesOut(BaseModel):
     asset_ratio: float
     note: str | None = None
     assets: list[PortfolioBalanceAssetOut]
+
+
+class SqlAdminExecuteRequest(BaseModel):
+    sql: str = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    max_rows: int = Field(default=500, ge=1, le=5000)
+
+
+class SqlAdminExecuteOut(BaseModel):
+    statement_type: str
+    rowcount: int
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    truncated: bool = False

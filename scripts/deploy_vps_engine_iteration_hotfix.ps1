@@ -90,6 +90,7 @@ $files = @(
     "src/mdtas/api/routes_indicators.py",
     "src/mdtas/api/routes_features.py",
     "src/mdtas/api/schemas.py",
+    "src/mdtas/api/routes_sql_admin.py",
     "src/mdtas/api/routes_trading.py",
     "src/services/trader_5m_main.py",
     "src/services/trader_1h_main.py",
